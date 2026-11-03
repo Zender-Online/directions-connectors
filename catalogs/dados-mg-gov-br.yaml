@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=../schema/catalog.schema.json
+id: dados-mg-gov-br
+title: Dados abertos de Minas Gerais
+connector: ckan
+baseUrl: https://dados.mg.gov.br
+checkedAt: '2026-11-02'

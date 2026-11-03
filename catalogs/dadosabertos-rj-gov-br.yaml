@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=../schema/catalog.schema.json
+id: dadosabertos-rj-gov-br
+title: Dados abertos do Rio de Janeiro
+connector: ckan
+baseUrl: https://dadosabertos.rj.gov.br
+checkedAt: '2026-11-02'

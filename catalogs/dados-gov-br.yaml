@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=../schema/catalog.schema.json
+id: dados-gov-br
+title: Portal Brasileiro de Dados Abertos
+connector: dados_gov_br
+baseUrl: https://dados.gov.br
+checkedAt: '2026-11-02'

@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=../schema/catalog.schema.json
+id: dados-pe-gov-br
+title: Dados abertos de Pernambuco
+connector: ckan
+baseUrl: https://dados.pe.gov.br
+checkedAt: '2026-11-02'

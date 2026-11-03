@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=../schema/catalog.schema.json
+id: dados-recife-pe-gov-br
+title: Dados abertos do Recife
+connector: ckan
+baseUrl: https://dados.recife.pe.gov.br
+checkedAt: '2026-11-02'

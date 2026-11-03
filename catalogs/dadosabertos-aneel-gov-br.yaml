@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=../schema/catalog.schema.json
+id: dadosabertos-aneel-gov-br
+title: Dados abertos da ANEEL
+connector: ckan
+baseUrl: https://dadosabertos.aneel.gov.br
+checkedAt: '2026-11-02'

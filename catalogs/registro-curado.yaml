@@ -1,0 +1,278 @@
+# yaml-language-server: $schema=../schema/catalog.schema.json
+id: registro-curado
+title: Registro curado de fontes públicas
+connector: curated
+datasets:
+- id: ibge-localidades
+  title: Municípios, estados e regiões do Brasil
+  publisher: IBGE
+  terms:
+  - municipio
+  - municipios
+  - estado
+  - estados
+  - uf
+  - regiao
+  - localidade
+  - ibge
+  endpoint: https://servicodados.ibge.gov.br/api/v1/localidades/estados
+  format: json
+  recordSelector: []
+  checkedAt: '2026-10-23'
+  measurement: 27 registros; `/estados/{uf}/municipios` devolve os municípios de uma UF
+- id: ibge-agregados
+  title: Agregados do SIDRA — população, censo, pesquisas
+  publisher: IBGE
+  terms:
+  - populacao
+  - censo
+  - sidra
+  - agregado
+  - pesquisa
+  - pnad
+  - ipca
+  - habitantes
+  endpoint: https://servicodados.ibge.gov.br/api/v3/agregados
+  format: json
+  recordSelector: []
+  checkedAt: '2026-10-23'
+  measurement: 70 pesquisas; cada uma lista os agregados, e o dado sai em /agregados/{id}/periodos/{p}/variaveis
+  note: 'O endpoint raiz é um CATÁLOGO de agregados, não o dado: escolher o agregado é parte do pedido.'
+- id: inmet-estacoes
+  title: Estações meteorológicas e medições
+  publisher: INMET
+  terms:
+  - clima
+  - tempo
+  - temperatura
+  - chuva
+  - meteorologia
+  - estacao
+  - inmet
+  endpoint: https://apitempo.inmet.gov.br/estacoes/T
+  format: json
+  recordSelector: []
+  checkedAt: '2026-10-23'
+  measurement: 669 estações automáticas
+- id: brasilapi
+  title: Feriados, CEP, bancos e tabelas de uso comum
+  publisher: BrasilAPI (comunidade)
+  terms:
+  - feriado
+  - feriados
+  - cep
+  - banco
+  - bancos
+  - ddd
+  - ncm
+  - corretora
+  endpoint: https://brasilapi.com.br/api/feriados/v1/2026
+  format: json
+  recordSelector: []
+  checkedAt: '2026-10-23'
+  measurement: 14 feriados em 2025, na mesma forma
+  note: 'Mantida pela comunidade, não por órgão público: boa para tabela de apoio, não para dado oficial.'
+- id: cnpj-ws
+  title: Cadastro de CNPJ
+  publisher: cnpj.ws (espelho aberto da Receita)
+  terms:
+  - cnpj
+  - empresa
+  - empresas
+  - receita
+  - cadastro
+  - socio
+  endpoint: https://publica.cnpj.ws/cnpj/00000000000191
+  format: json
+  recordSelector: []
+  checkedAt: '2026-10-23'
+  measurement: consulta por CNPJ; a base completa da Receita é download em arquivo, não API
+  note: Consulta UM CNPJ por vez, com limite de uso. Não serve para varrer a base.
+- id: ans-operadoras
+  title: Operadoras de plano de saúde ativas
+  publisher: ANS
+  terms:
+  - operadora
+  - operadoras
+  - plano
+  - planos
+  - saude
+  - ans
+  - suplementar
+  endpoint: https://dadosabertos.ans.gov.br/FTP/PDA/operadoras_de_plano_de_saude_ativas/Relatorio_cadop.csv
+  format: csv
+  recordSelector: []
+  checkedAt: '2026-10-23'
+  measurement: 1.106 operadoras; colunas REGISTRO_OPERADORA, CNPJ, RAZAO_SOCIAL, NOME_FANTASIA
+  note: A ANS publica por FTP/HTTP em árvore de pastas, e NÃO responde a API de CKAN — o caminho do arquivo
+    é o contrato.
+- id: anvisa-medicamentos
+  title: Medicamentos registrados
+  publisher: Anvisa
+  terms:
+  - medicamento
+  - medicamentos
+  - remedio
+  - anvisa
+  - registro
+  - farmaco
+  endpoint: https://dados.anvisa.gov.br/dados/DADOS_ABERTOS_MEDICAMENTOS.csv
+  format: csv
+  recordSelector: []
+  checkedAt: '2026-10-23'
+  measurement: HTTP 200 com 44,8 MB em 8,9 s
+  note: '44,8 MB: NÃO cabe na sondagem (teto de 2 MB), e por isso ela reporta falha. O runner lê — o teto
+    da receita é 2 GB. É o caso em que a amostra não se mostra antes de aprovar.'
+- id: inpe-desmatamento
+  title: Desmatamento por ano (PRODES)
+  publisher: INPE · TerraBrasilis
+  terms:
+  - desmatamento
+  - prodes
+  - amazonia
+  - inpe
+  - floresta
+  - bioma
+  - terrabrasilis
+  endpoint: https://terrabrasilis.dpi.inpe.br/geoserver/prodes-amazon-nb/yearly_deforestation_biome/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=prodes-amazon-nb:yearly_deforestation_biome&outputFormat=application/json&maxFeatures=1000
+  format: geojson
+  recordSelector: []
+  checkedAt: '2026-10-23'
+  measurement: GeoJSON; o GetCapabilities lista 93 camadas (168 KB)
+  note: 'Padrão OGC WFS: trocar `typeName` alcança as outras 92 camadas. NÃO há camada de fogo aqui —
+    queimadas é outro sistema.'
+- id: bcb-olinda
+  title: Séries e expectativas do Banco Central
+  publisher: Banco Central · Olinda
+  terms:
+  - cambio
+  - dolar
+  - selic
+  - inflacao
+  - expectativa
+  - bcb
+  - juros
+  - mercado
+  endpoint: https://olinda.bcb.gov.br/olinda/servico/Expectativas/versao/v1/odata/ExpectativaMercadoMensais?$top=100&$format=json
+  format: json
+  recordSelector:
+  - value
+  checkedAt: '2026-10-23'
+  measurement: 'OData: `$top`, `$filter` e `$format` são padronizados'
+  note: Padrão OData — paginação e filtro vêm de graça, sem aprender a API. O `$metadata` lista as entidades,
+    em XML.
+- id: tse-dados-abertos
+  title: Eleições — candidatos, resultados, prestação de contas
+  publisher: TSE
+  terms:
+  - eleicao
+  - eleicoes
+  - candidato
+  - candidatos
+  - votacao
+  - urna
+  - tse
+  - voto
+  endpoint: https://dadosabertos.tse.jus.br/api/3/action/package_search?q=candidatos&rows=10
+  format: json
+  recordSelector:
+  - result
+  - results
+  checkedAt: '2026-10-23'
+  measurement: 'CKAN: a busca responde; os recursos são ZIP por ano e eleição'
+  note: 'O endpoint é BUSCA, não dado: devolve conjuntos, e os arquivos vêm compactados — a sondagem não
+    abre ZIP, então aqui a escolha do recurso é humana.'
+- id: inep-ica
+  title: Indicador Criança Alfabetizada (ICA) — resultados e metas
+  publisher: INEP
+  terms:
+  - alfabetizacao
+  - alfabetizada
+  - alfabetizadas
+  - alfabetizado
+  - crianca
+  - criancas
+  - letramento
+  acronym: ica
+  endpoint: https://www.gov.br/inep/pt-br/areas-de-atuacao/avaliacao-e-exames-educacionais/avaliacao-da-alfabetizacao/resultados
+  format: page
+  checkedAt: '2026-10-28'
+  measurement: abas 2023–2025; em 2025, planilhas por UF e por município (xlsx) e microdados (zip)
+- id: inep-ideb
+  title: Índice de Desenvolvimento da Educação Básica (Ideb) — resultados
+  publisher: INEP
+  terms:
+  - aprovacao
+  - fluxo
+  - rendimento
+  acronym: ideb
+  endpoint: https://www.gov.br/inep/pt-br/areas-de-atuacao/pesquisas-estatisticas-e-indicadores/ideb/resultados
+  format: page
+  checkedAt: '2026-10-28'
+  measurement: uma aba 2005–2025; zip por etapa e por escola, município, UF e Brasil
+- id: inep-saeb
+  title: Saeb — resultados
+  publisher: INEP
+  terms:
+  - proficiencia
+  - desempenho
+  acronym: saeb
+  endpoint: https://www.gov.br/inep/pt-br/areas-de-atuacao/avaliacao-e-exames-educacionais/saeb/resultados
+  format: page
+  checkedAt: '2026-10-28'
+  measurement: 18 abas, 1995–2025; em 2025, uma planilha (xlsx, 24 MB)
+- id: inep-sinopse
+  title: Sinopse Estatística da Educação Básica
+  publisher: INEP
+  terms:
+  - sinopse
+  - escolar
+  - matricula
+  - matriculas
+  endpoint: https://www.gov.br/inep/pt-br/acesso-a-informacao/dados-abertos/sinopses-estatisticas/educacao-basica
+  format: page
+  checkedAt: '2026-10-28'
+  measurement: zip por ano, 1995–2025, na própria página; 2025 é um xlsx de 199 MB com 268 abas
+- id: datasus-cnes
+  title: Estabelecimentos de saúde (CNES) e Farmácia Popular
+  publisher: Ministério da Saúde · DATASUS
+  terms:
+  - cnes
+  - farmacia
+  - popular
+  - estabelecimento
+  - hospital
+  - ubs
+  - datasus
+  - sus
+  endpoint: null
+  checkedAt: '2026-10-23'
+  note: '`apidadosabertos.saude.gov.br` e `opendatasus.saude.gov.br` derrubam a conexão (ECONNRESET),
+    inclusive em fetch cru sem a nossa cerca — não é teto nosso. Sem endereço conferido, não entra endereço.'
+- id: dados-gov-br
+  title: Catálogo federal de dados abertos
+  publisher: gov.br
+  terms:
+  - dados
+  - abertos
+  - catalogo
+  - federal
+  - governo
+  endpoint: null
+  checkedAt: '2026-10-23'
+  note: 'API própria com chave (`chave-api-dados-abertos`): devolve 403 sem ela, e o caminho do CKAN não
+    existe. Pedir a chave é decisão de quem opera o deploy.'
+- id: transparencia
+  title: Gastos, convênios e benefícios do governo federal
+  publisher: CGU · Portal da Transparência
+  terms:
+  - gasto
+  - gastos
+  - despesa
+  - convenio
+  - transparencia
+  - orcamento
+  - beneficio
+  endpoint: null
+  checkedAt: '2026-10-23'
+  note: 'API documentada, mas exige chave: 401 sem ela.'

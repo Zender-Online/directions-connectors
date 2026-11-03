@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=../schema/catalog.schema.json
+id: dados-prefeitura-sp-gov-br
+title: Dados abertos da Prefeitura de São Paulo
+connector: ckan
+baseUrl: https://dados.prefeitura.sp.gov.br
+checkedAt: '2026-11-02'

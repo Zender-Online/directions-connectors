@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=../schema/catalog.schema.json
+id: dados-tce-rs-gov-br
+title: Dados abertos do TCE-RS
+connector: ckan
+baseUrl: https://dados.tce.rs.gov.br
+checkedAt: '2026-11-02'

@@ -1,0 +1,14 @@
+{
+  "name": "directions-connectors",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "validate": "node scripts/validate.mjs",
+    "bundle": "node scripts/bundle.mjs"
+  },
+  "devDependencies": {
+    "ajv": "8.17.1",
+    "ajv-formats": "3.0.1",
+    "yaml": "2.8.1"
+  }
+}

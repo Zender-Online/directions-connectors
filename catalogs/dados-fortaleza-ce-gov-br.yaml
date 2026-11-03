@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=../schema/catalog.schema.json
+id: dados-fortaleza-ce-gov-br
+title: Dados abertos de Fortaleza
+connector: ckan
+baseUrl: https://dados.fortaleza.ce.gov.br
+checkedAt: '2026-11-02'

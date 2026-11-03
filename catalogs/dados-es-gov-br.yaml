@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=../schema/catalog.schema.json
+id: dados-es-gov-br
+title: Dados abertos do Espírito Santo
+connector: ckan
+baseUrl: https://dados.es.gov.br
+checkedAt: '2026-11-02'

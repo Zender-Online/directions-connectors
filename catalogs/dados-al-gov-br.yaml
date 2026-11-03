@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=../schema/catalog.schema.json
+id: dados-al-gov-br
+title: Dados abertos de Alagoas
+connector: ckan
+baseUrl: https://dados.al.gov.br/catalogo
+checkedAt: '2026-11-02'
