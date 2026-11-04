@@ -197,6 +197,7 @@ datasets:
   endpoint: https://www.gov.br/inep/pt-br/areas-de-atuacao/avaliacao-e-exames-educacionais/avaliacao-da-alfabetizacao/resultados
   format: page
   checkedAt: '2026-10-28'
+  updatedAt: '2026-08-24'
   measurement: abas 2023–2025; em 2025, planilhas por UF e por município (xlsx) e microdados (zip)
 - id: inep-ideb
   title: Índice de Desenvolvimento da Educação Básica (Ideb) — resultados
@@ -209,6 +210,7 @@ datasets:
   endpoint: https://www.gov.br/inep/pt-br/areas-de-atuacao/pesquisas-estatisticas-e-indicadores/ideb/resultados
   format: page
   checkedAt: '2026-10-28'
+  updatedAt: '2026-08-05'
   measurement: uma aba 2005–2025; zip por etapa e por escola, município, UF e Brasil
 - id: inep-saeb
   title: Saeb — resultados
@@ -220,6 +222,7 @@ datasets:
   endpoint: https://www.gov.br/inep/pt-br/areas-de-atuacao/avaliacao-e-exames-educacionais/saeb/resultados
   format: page
   checkedAt: '2026-10-28'
+  updatedAt: '2026-08-07'
   measurement: 18 abas, 1995–2025; em 2025, uma planilha (xlsx, 24 MB)
 - id: inep-sinopse
   title: Sinopse Estatística da Educação Básica
@@ -232,6 +235,7 @@ datasets:
   endpoint: https://www.gov.br/inep/pt-br/acesso-a-informacao/dados-abertos/sinopses-estatisticas/educacao-basica
   format: page
   checkedAt: '2026-10-28'
+  updatedAt: '2026-07-30'
   measurement: zip por ano, 1995–2025, na própria página; 2025 é um xlsx de 199 MB com 268 abas
 - id: inep-microdados-censo-escolar
   title: Microdados do Censo Escolar da Educação Básica
@@ -244,6 +248,7 @@ datasets:
   endpoint: https://www.gov.br/inep/pt-br/acesso-a-informacao/dados-abertos/microdados/censo-escolar
   format: page
   checkedAt: '2026-11-04'
+  updatedAt: '2026-07-31'
   measurement: zip por ano, 1995–2025; o de 2025 tem ~537 MB, com escola, matrícula, turma, docente e gestor em CSV e o dicionário em xlsx
 - id: datasus-cnes
   title: Estabelecimentos de saúde (CNES) e Farmácia Popular

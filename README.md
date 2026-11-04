@@ -17,6 +17,16 @@ dele continua valendo: todo endereço foi sondado, e `checkedAt` diz quando resp
 sem porta aberta fica registrado com `endpoint: null` e o motivo em `note`, porque "não existe
 fonte aberta" é resposta.
 
+`updatedAt`, opcional, é o dia em que o publicador mudou o dado. A engine compara esse dia com a
+última execução de cada fonte e avisa no sino quando ele é mais novo. Não confundir com
+`checkedAt`: sondar de novo não é versão nova.
+
+- A fonte do dia é o `Last-Modified` do arquivo que a fonte baixa, em UTC. O "Atualizado em" da
+  página do portal vale só quando o arquivo não diz.
+- Medido em 04/11/2026: nas páginas do INEP, o "Atualizado em" bate com o arquivo em quatro das
+  cinco entradas. No ICA a página dizia 01/04 e o arquivo, 24/08.
+- Mudar o `updatedAt` é publicar uma tag nova: é ela que leva o dia às engines.
+
 ## Versão
 
 A engine carrega **uma tag publicada** deste repositório, fixada na configuração do deploy. Ela
