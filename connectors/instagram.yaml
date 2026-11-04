@@ -1,0 +1,240 @@
+# yaml-language-server: $schema=../schema/connector.schema.json
+#
+# Traduzido de airbytehq/airbyte source-instagram 4.2.50, commit
+# e8cdbb81b382fefdb662670e74342c073f7ccb4b. Elastic License 2.0: ver vendor/airbyte/LICENSE.
+# MODIFICADO: o campo `origin.modifications` abaixo diz o quê.
+id: instagram
+title: Instagram (contas comerciais)
+publisher: Meta
+kind: http-declarative
+origin:
+  project: airbytehq/airbyte
+  connector: source-instagram
+  version: 4.2.50
+  commit: e8cdbb81b382fefdb662670e74342c073f7ccb4b
+  license: Elastic-2.0
+  modifications: >-
+    Reescrito no formato http-declarative do Directions. O encadeamento entre streams virou
+    partição sobre a tabela publicada do pai ({{table:<stream>}}); as métricas por tipo de mídia
+    saem do SELECT da partição. As transformações em Python (filhos do carrossel, achatar
+    insights e breakdowns, limpar URL assinada, juntar os períodos de user_insights) não estão
+    aqui: ficam para o SQL no ClickHouse, sobre o RAW. user_insights lê janelas de um dia nos
+    últimos 30 dias em vez do cursor incremental.
+manifest:
+  version: 1
+  requester:
+    urlTemplate: https://graph.facebook.com/v23.0/me/accounts
+    params: {}
+  auth:
+    type: bearer
+    secretRef: access_token
+  paginator:
+    type: cursor
+    param: after
+    cursorPath: [paging, cursors, after]
+  rateLimit:
+    requestsPerMinute: 60
+  streams:
+    # As páginas do Facebook que a pessoa administra; cada uma pode ter uma conta comercial do
+    # Instagram ligada. É o pai de todos os outros.
+    - name: accounts
+      params:
+        fields: id,instagram_business_account
+        limit: "100"
+        after: "{{cursor}}"
+      recordSelector: [data]
+
+    - name: users
+      request:
+        urlTemplate: https://graph.facebook.com/v23.0/{{account}}
+      params:
+        fields: id,biography,ig_id,followers_count,follows_count,media_count,name,profile_picture_url,username,website
+
+    - name: media
+      request:
+        urlTemplate: https://graph.facebook.com/v23.0/{{account}}/media
+      params:
+        fields: caption,comments_count,id,ig_id,is_comment_enabled,like_count,media_type,media_product_type,media_url,owner,permalink,shortcode,thumbnail_url,timestamp,username,children
+        limit: "100"
+        after: "{{cursor}}"
+      recordSelector: [data]
+
+    - name: media_insights
+      request:
+        urlTemplate: https://graph.facebook.com/v23.0/{{media_id}}/insights
+      params:
+        metric: "{{metric}}"
+      recordSelector: [data]
+      ignoreErrors: &insights_errors
+        # Mídia publicada antes de a conta virar comercial: não tem insights.
+        - status: 400
+          match:
+            - path: [error, error_subcode]
+              equals: [2108006]
+        - status: 400
+          match:
+            - path: [error, code]
+              equals: [100]
+            - path: [error, error_subcode]
+              equals: [33]
+        # O app não tem a permissão para aquela métrica naquela mídia.
+        - status: 400
+          match:
+            - path: [error, code]
+              equals: [10]
+        - status: 403
+          match:
+            - path: [error, code]
+              equals: [10]
+
+    - name: stories
+      request:
+        urlTemplate: https://graph.facebook.com/v23.0/{{account}}/stories
+      params:
+        fields: caption,id,ig_id,like_count,media_type,media_product_type,media_url,owner,permalink,shortcode,thumbnail_url,timestamp,username
+        limit: "100"
+        after: "{{cursor}}"
+      recordSelector: [data]
+
+    - name: story_insights
+      request:
+        urlTemplate: https://graph.facebook.com/v23.0/{{story_id}}/insights
+      params:
+        metric: reach,replies,follows,profile_visits,shares,total_interactions,views
+      recordSelector: [data]
+      ignoreErrors:
+        - status: 400
+          match:
+            - path: [error, code]
+              equals: [10]
+        - status: 403
+          match:
+            - path: [error, code]
+              equals: [10]
+
+    - name: user_lifetime_insights
+      request:
+        urlTemplate: https://graph.facebook.com/v23.0/{{account}}/insights
+      params:
+        metric: follower_demographics
+        period: lifetime
+        metric_type: total_value
+        breakdown: "{{breakdown}}"
+        limit: "100"
+      recordSelector: [data]
+
+    - name: user_insights
+      request:
+        urlTemplate: https://graph.facebook.com/v23.0/{{account}}/insights
+      params:
+        period: "{{period}}"
+        metric: "{{metric}}"
+        since: "{{window_start}}"
+        until: "{{window_end}}"
+      recordSelector: [data]
+      ignoreErrors:
+        - status: 400
+          match:
+            - path: [error, error_subcode]
+              equals: [2108006]
+        - status: 400
+          match:
+            - path: [error, code]
+              equals: [100]
+            - path: [error, error_subcode]
+              equals: [33]
+        - status: 400
+          match:
+            - path: [error, code]
+              equals: [10]
+        # Janela com `since` no futuro, para conta em fuso à frente do UTC: o dia volta na
+        # execução seguinte.
+        - status: 400
+          match:
+            - path: [error, code]
+              equals: [100]
+            - path: [error, message]
+              contains: since param is not valid
+
+# Como cada stream é lido. Os filhos tiram as partições da tabela publicada do pai, desta
+# mesma fonte: o pai precisa ter rodado e publicado antes.
+streams:
+  - name: accounts
+    syncMode: full_refresh
+    primaryKey: [[id]]
+
+  - name: users
+    syncMode: full_refresh
+    primaryKey: [[id]]
+    partitions: &per_account
+      query: >-
+        SELECT DISTINCT JSONExtractString(instagram_business_account, 'id') AS account
+        FROM {{table:accounts}}
+        WHERE account != ''
+        ORDER BY account
+
+  - name: media
+    syncMode: full_refresh
+    primaryKey: [[id]]
+    partitions: *per_account
+
+  - name: media_insights
+    syncMode: full_refresh
+    partitions:
+      # A métrica depende do tipo da mídia: a mesma escolha que o Airbyte faz em Jinja.
+      query: >-
+        SELECT id AS media_id,
+          multiIf(
+            media_product_type = 'REELS',
+              'comments,ig_reels_avg_watch_time,ig_reels_video_view_total_time,likes,reach,saved,shares,views',
+            media_type = 'VIDEO' AND media_product_type = 'FEED', 'reach,saved',
+            media_type = 'VIDEO', 'reach,saved,likes,comments,shares,follows,profile_visits',
+            media_type = 'CAROUSEL_ALBUM', 'reach,saved,shares,follows,profile_visits',
+            'reach,saved,likes,comments,shares,follows,profile_visits'
+          ) AS metric
+        FROM {{table:media}}
+        WHERE id != ''
+        ORDER BY media_id
+
+  - name: stories
+    syncMode: full_refresh
+    primaryKey: [[id]]
+    partitions: *per_account
+
+  - name: story_insights
+    syncMode: full_refresh
+    partitions:
+      query: >-
+        SELECT id AS story_id FROM {{table:stories}} WHERE id != '' ORDER BY story_id
+
+  - name: user_lifetime_insights
+    syncMode: full_refresh
+    partitions:
+      query: >-
+        SELECT account, breakdown
+        FROM (
+          SELECT DISTINCT JSONExtractString(instagram_business_account, 'id') AS account
+          FROM {{table:accounts}}
+        )
+        ARRAY JOIN ['city', 'country', 'age,gender'] AS breakdown
+        WHERE account != ''
+        ORDER BY account, breakdown
+
+  - name: user_insights
+    syncMode: full_refresh
+    partitions:
+      # Um pedido por conta × par período/métrica × dia, nos últimos 30 dias: o mesmo intervalo e
+      # os mesmos pares que o Airbyte pede.
+      query: >-
+        SELECT account, chunk.1 AS period, chunk.2 AS metric,
+          formatDateTime(toDateTime(day), '%Y-%m-%dT%H:%i:%SZ', 'UTC') AS window_start,
+          formatDateTime(toDateTime(day + 1), '%Y-%m-%dT%H:%i:%SZ', 'UTC') AS window_end
+        FROM (
+          SELECT DISTINCT JSONExtractString(instagram_business_account, 'id') AS account
+          FROM {{table:accounts}}
+        )
+        ARRAY JOIN [('day', 'follower_count,reach'), ('week', 'reach'), ('days_28', 'reach'),
+          ('lifetime', 'online_followers')] AS chunk
+        ARRAY JOIN arrayMap(i -> today() - i, range(1, 31)) AS day
+        WHERE account != ''
+        ORDER BY account, period, window_start
