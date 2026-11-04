@@ -1,0 +1,719 @@
+# yaml-language-server: $schema=../schema/connector.schema.json
+#
+# Traduzido de airbytehq/airbyte source-google-analytics-data-api 2.11.10, commit
+# e8cdbb81b382fefdb662670e74342c073f7ccb4b. Elastic License 2.0: ver vendor/airbyte/LICENSE.
+# MODIFICADO: o campo `origin.modifications` abaixo diz o quê.
+id: google-analytics-4
+title: Google Analytics 4 (relatórios padrão)
+publisher: Google
+kind: http-declarative
+origin:
+  project: airbytehq/airbyte
+  connector: source-google-analytics-data-api
+  version: 2.11.10
+  commit: e8cdbb81b382fefdb662670e74342c073f7ccb4b
+  license: Elastic-2.0
+  modifications: >-
+    Reescrito no formato http-declarative do Directions, só com os 57 relatórios padrão e
+    autenticação OAuth2 com refresh token (sem conta de serviço, sem relatórios próprios, sem
+    pivô nem coorte). As propriedades não vêm da configuração: saem da lista de propriedades que a
+    credencial enxerga (accountSummaries), e cada relatório é uma partição por propriedade. A
+    janela é fixa, dos últimos 30 dias até ontem, em vez do cursor incremental de 365 dias. As
+    linhas ficam como a API devolve (dimensionValues e metricValues na ordem do pedido, com a
+    propriedade em _partition); juntar nome e valor, o que o CombinedExtractor faz em Python, fica
+    para o SQL no ClickHouse, sobre o RAW.
+manifest:
+  version: 1
+  requester:
+    urlTemplate: https://analyticsdata.googleapis.com/v1beta/properties/{{property_id}}:runReport
+    method: POST
+    headers:
+      content-type: application/json
+  auth:
+    type: oauth2
+    tokenUrl: https://oauth2.googleapis.com/token
+    clientIdRef: client_id
+    clientSecretRef: client_secret
+    refreshTokenRef: refresh_token
+  # Os relatórios paginam por offset dentro do corpo, de 25 mil linhas, como no Airbyte. O
+  # rowCount diz quando parar, sem pedir uma página vazia no fim.
+  paginator:
+    type: offset
+    param: offset
+    sizeParam: limit
+    size: 25000
+    totalPath: [rowCount]
+  rateLimit:
+    requestsPerMinute: 60
+  streams:
+    # As contas e propriedades que a credencial enxerga. É o pai de todos os outros.
+    - name: account_summaries
+      request:
+        urlTemplate: https://analyticsadmin.googleapis.com/v1beta/accountSummaries
+        method: GET
+      params:
+        pageSize: "200"
+        pageToken: "{{cursor}}"
+      paginator:
+        type: cursor
+        param: pageToken
+        cursorPath: [nextPageToken]
+      recordSelector: [accountSummaries]
+      missingIsEmpty: true
+
+    # A propriedade: nome, fuso, moeda. O mesmo pedido do property_metadata do Airbyte.
+    - name: property_metadata
+      request:
+        urlTemplate: https://analyticsadmin.googleapis.com/v1beta/properties/{{property_id}}
+        method: GET
+      paginator:
+        type: none
+      singleRecord: true
+
+    # Os 57 relatórios padrão do Airbyte: dimensões e métricas iguais, ordenados por todas as
+    # dimensões para que o offset seja estável entre páginas.
+    - name: daily_active_users
+      request:
+        body: '{"dimensions":[{"name":"date"}],"metrics":[{"name":"active1DayUsers"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: weekly_active_users
+      request:
+        body: '{"dimensions":[{"name":"date"}],"metrics":[{"name":"active7DayUsers"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: four_weekly_active_users
+      request:
+        body: '{"dimensions":[{"name":"date"}],"metrics":[{"name":"active28DayUsers"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: devices
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"deviceCategory"},{"name":"operatingSystem"},{"name":"browser"}],"metrics":[{"name":"totalUsers"},{"name":"newUsers"},{"name":"sessions"},{"name":"sessionsPerUser"},{"name":"averageSessionDuration"},{"name":"screenPageViews"},{"name":"screenPageViewsPerSession"},{"name":"bounceRate"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"deviceCategory"}},{"dimension":{"dimensionName":"operatingSystem"}},{"dimension":{"dimensionName":"browser"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: locations
+      request:
+        body: '{"dimensions":[{"name":"region"},{"name":"country"},{"name":"city"},{"name":"date"}],"metrics":[{"name":"totalUsers"},{"name":"newUsers"},{"name":"sessions"},{"name":"sessionsPerUser"},{"name":"averageSessionDuration"},{"name":"screenPageViews"},{"name":"screenPageViewsPerSession"},{"name":"bounceRate"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"region"}},{"dimension":{"dimensionName":"country"}},{"dimension":{"dimensionName":"city"}},{"dimension":{"dimensionName":"date"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: pages
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"hostName"},{"name":"pagePathPlusQueryString"}],"metrics":[{"name":"screenPageViews"},{"name":"bounceRate"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"hostName"}},{"dimension":{"dimensionName":"pagePathPlusQueryString"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: traffic_sources
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"sessionSource"},{"name":"sessionMedium"}],"metrics":[{"name":"totalUsers"},{"name":"newUsers"},{"name":"sessions"},{"name":"sessionsPerUser"},{"name":"averageSessionDuration"},{"name":"screenPageViews"},{"name":"screenPageViewsPerSession"},{"name":"bounceRate"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"sessionSource"}},{"dimension":{"dimensionName":"sessionMedium"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: website_overview
+      request:
+        body: '{"dimensions":[{"name":"date"}],"metrics":[{"name":"totalUsers"},{"name":"newUsers"},{"name":"sessions"},{"name":"sessionsPerUser"},{"name":"averageSessionDuration"},{"name":"screenPageViews"},{"name":"screenPageViewsPerSession"},{"name":"bounceRate"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: user_acquisition_first_user_medium_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"firstUserMedium"}],"metrics":[{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"},{"name":"totalUsers"},{"name":"userEngagementDuration"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"firstUserMedium"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: user_acquisition_first_user_source_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"firstUserSource"}],"metrics":[{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"},{"name":"totalUsers"},{"name":"userEngagementDuration"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"firstUserSource"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: user_acquisition_first_user_source_medium_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"firstUserSource"},{"name":"firstUserMedium"}],"metrics":[{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"},{"name":"totalUsers"},{"name":"userEngagementDuration"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"firstUserSource"}},{"dimension":{"dimensionName":"firstUserMedium"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: user_acquisition_first_user_source_platform_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"firstUserSourcePlatform"}],"metrics":[{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"},{"name":"totalUsers"},{"name":"userEngagementDuration"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"firstUserSourcePlatform"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: user_acquisition_first_user_campaign_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"firstUserCampaignName"}],"metrics":[{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"},{"name":"totalUsers"},{"name":"userEngagementDuration"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"firstUserCampaignName"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: user_acquisition_first_user_google_ads_ad_network_type_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"firstUserGoogleAdsAdNetworkType"}],"metrics":[{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"},{"name":"totalUsers"},{"name":"userEngagementDuration"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"firstUserGoogleAdsAdNetworkType"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: user_acquisition_first_user_google_ads_ad_group_name_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"firstUserGoogleAdsAdGroupName"}],"metrics":[{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"},{"name":"totalUsers"},{"name":"userEngagementDuration"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"firstUserGoogleAdsAdGroupName"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: traffic_acquisition_session_source_medium_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"sessionSource"},{"name":"sessionMedium"}],"metrics":[{"name":"totalUsers"},{"name":"sessions"},{"name":"engagedSessions"},{"name":"eventsPerSession"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"},{"name":"userEngagementDuration"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"sessionSource"}},{"dimension":{"dimensionName":"sessionMedium"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: traffic_acquisition_session_medium_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"sessionMedium"}],"metrics":[{"name":"totalUsers"},{"name":"sessions"},{"name":"engagedSessions"},{"name":"eventsPerSession"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"},{"name":"userEngagementDuration"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"sessionMedium"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: traffic_acquisition_session_source_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"sessionSource"}],"metrics":[{"name":"totalUsers"},{"name":"sessions"},{"name":"engagedSessions"},{"name":"eventsPerSession"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"},{"name":"userEngagementDuration"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"sessionSource"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: traffic_acquisition_session_campaign_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"sessionCampaignName"}],"metrics":[{"name":"totalUsers"},{"name":"sessions"},{"name":"engagedSessions"},{"name":"eventsPerSession"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"},{"name":"userEngagementDuration"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"sessionCampaignName"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: traffic_acquisition_session_default_channel_grouping_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"sessionDefaultChannelGrouping"}],"metrics":[{"name":"totalUsers"},{"name":"sessions"},{"name":"engagedSessions"},{"name":"eventsPerSession"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"},{"name":"userEngagementDuration"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"sessionDefaultChannelGrouping"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: traffic_acquisition_session_source_platform_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"sessionSourcePlatform"}],"metrics":[{"name":"totalUsers"},{"name":"sessions"},{"name":"engagedSessions"},{"name":"eventsPerSession"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"},{"name":"userEngagementDuration"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"sessionSourcePlatform"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: events_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"eventName"}],"metrics":[{"name":"eventCount"},{"name":"totalUsers"},{"name":"eventCountPerUser"},{"name":"totalRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"eventName"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: weekly_events_report
+      request:
+        body: '{"dimensions":[{"name":"yearWeek"},{"name":"eventName"}],"metrics":[{"name":"eventCount"},{"name":"totalUsers"},{"name":"eventCountPerUser"},{"name":"totalRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"yearWeek"}},{"dimension":{"dimensionName":"eventName"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: conversions_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"eventName"}],"metrics":[{"name":"conversions"},{"name":"totalUsers"},{"name":"totalRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"eventName"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: pages_title_and_screen_class_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"unifiedScreenClass"}],"metrics":[{"name":"screenPageViews"},{"name":"totalUsers"},{"name":"newUsers"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"},{"name":"userEngagementDuration"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"unifiedScreenClass"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: pages_path_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"pagePath"}],"metrics":[{"name":"screenPageViews"},{"name":"totalUsers"},{"name":"newUsers"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"},{"name":"userEngagementDuration"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"pagePath"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: pages_title_and_screen_name_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"unifiedScreenName"}],"metrics":[{"name":"screenPageViews"},{"name":"totalUsers"},{"name":"newUsers"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"},{"name":"userEngagementDuration"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"unifiedScreenName"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: content_group_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"contentGroup"}],"metrics":[{"name":"screenPageViews"},{"name":"totalUsers"},{"name":"newUsers"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"},{"name":"userEngagementDuration"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"contentGroup"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: ecommerce_purchases_item_name_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"itemName"}],"metrics":[{"name":"cartToViewRate"},{"name":"purchaseToViewRate"},{"name":"itemsPurchased"},{"name":"itemRevenue"},{"name":"itemsAddedToCart"},{"name":"itemsViewed"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"itemName"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: ecommerce_purchases_item_id_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"itemId"}],"metrics":[{"name":"cartToViewRate"},{"name":"purchaseToViewRate"},{"name":"itemsPurchased"},{"name":"itemRevenue"},{"name":"itemsAddedToCart"},{"name":"itemsViewed"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"itemId"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: ecommerce_purchases_item_category_report_combined
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"itemCategory"},{"name":"itemCategory2"},{"name":"itemCategory3"},{"name":"itemCategory4"},{"name":"itemCategory5"}],"metrics":[{"name":"cartToViewRate"},{"name":"purchaseToViewRate"},{"name":"itemsPurchased"},{"name":"itemRevenue"},{"name":"itemsAddedToCart"},{"name":"itemsViewed"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"itemCategory"}},{"dimension":{"dimensionName":"itemCategory2"}},{"dimension":{"dimensionName":"itemCategory3"}},{"dimension":{"dimensionName":"itemCategory4"}},{"dimension":{"dimensionName":"itemCategory5"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: ecommerce_purchases_item_category_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"itemCategory"}],"metrics":[{"name":"cartToViewRate"},{"name":"purchaseToViewRate"},{"name":"itemsPurchased"},{"name":"itemRevenue"},{"name":"itemsAddedToCart"},{"name":"itemsViewed"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"itemCategory"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: ecommerce_purchases_item_category_2_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"itemCategory2"}],"metrics":[{"name":"cartToViewRate"},{"name":"purchaseToViewRate"},{"name":"itemsPurchased"},{"name":"itemRevenue"},{"name":"itemsAddedToCart"},{"name":"itemsViewed"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"itemCategory2"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: ecommerce_purchases_item_category_3_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"itemCategory3"}],"metrics":[{"name":"cartToViewRate"},{"name":"purchaseToViewRate"},{"name":"itemsPurchased"},{"name":"itemRevenue"},{"name":"itemsAddedToCart"},{"name":"itemsViewed"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"itemCategory3"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: ecommerce_purchases_item_category_4_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"itemCategory4"}],"metrics":[{"name":"cartToViewRate"},{"name":"purchaseToViewRate"},{"name":"itemsPurchased"},{"name":"itemRevenue"},{"name":"itemsAddedToCart"},{"name":"itemsViewed"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"itemCategory4"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: ecommerce_purchases_item_category_5_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"itemCategory5"}],"metrics":[{"name":"cartToViewRate"},{"name":"purchaseToViewRate"},{"name":"itemsPurchased"},{"name":"itemRevenue"},{"name":"itemsAddedToCart"},{"name":"itemsViewed"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"itemCategory5"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: ecommerce_purchases_item_brand_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"itemBrand"}],"metrics":[{"name":"cartToViewRate"},{"name":"purchaseToViewRate"},{"name":"itemsPurchased"},{"name":"itemRevenue"},{"name":"itemsAddedToCart"},{"name":"itemsViewed"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"itemBrand"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: publisher_ads_ad_unit_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"adUnitName"}],"metrics":[{"name":"publisherAdImpressions"},{"name":"adUnitExposure"},{"name":"publisherAdClicks"},{"name":"totalAdRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"adUnitName"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: publisher_ads_page_path_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"pagePath"}],"metrics":[{"name":"publisherAdImpressions"},{"name":"adUnitExposure"},{"name":"publisherAdClicks"},{"name":"totalAdRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"pagePath"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: publisher_ads_ad_format_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"adFormat"}],"metrics":[{"name":"publisherAdImpressions"},{"name":"adUnitExposure"},{"name":"publisherAdClicks"},{"name":"totalAdRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"adFormat"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: publisher_ads_ad_source_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"adSourceName"}],"metrics":[{"name":"publisherAdImpressions"},{"name":"adUnitExposure"},{"name":"publisherAdClicks"},{"name":"totalAdRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"adSourceName"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: demographic_country_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"country"}],"metrics":[{"name":"totalUsers"},{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"conversions"},{"name":"totalRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"country"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: demographic_region_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"region"}],"metrics":[{"name":"totalUsers"},{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"conversions"},{"name":"totalRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"region"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: demographic_city_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"city"}],"metrics":[{"name":"totalUsers"},{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"conversions"},{"name":"totalRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"city"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: demographic_language_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"language"}],"metrics":[{"name":"totalUsers"},{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"conversions"},{"name":"totalRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"language"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: demographic_age_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"userAgeBracket"}],"metrics":[{"name":"totalUsers"},{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"conversions"},{"name":"totalRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"userAgeBracket"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: demographic_gender_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"userGender"}],"metrics":[{"name":"totalUsers"},{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"conversions"},{"name":"totalRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"userGender"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: demographic_interest_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"brandingInterest"}],"metrics":[{"name":"totalUsers"},{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"conversions"},{"name":"totalRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"brandingInterest"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: tech_browser_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"browser"}],"metrics":[{"name":"totalUsers"},{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"browser"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: tech_device_category_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"deviceCategory"}],"metrics":[{"name":"totalUsers"},{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"deviceCategory"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: tech_device_model_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"deviceModel"}],"metrics":[{"name":"totalUsers"},{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"deviceModel"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: tech_screen_resolution_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"screenResolution"}],"metrics":[{"name":"totalUsers"},{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"screenResolution"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: tech_app_version_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"appVersion"}],"metrics":[{"name":"totalUsers"},{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"appVersion"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: tech_platform_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"platform"}],"metrics":[{"name":"totalUsers"},{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"platform"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: tech_platform_device_category_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"platform"},{"name":"deviceCategory"}],"metrics":[{"name":"totalUsers"},{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"platform"}},{"dimension":{"dimensionName":"deviceCategory"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: tech_operating_system_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"operatingSystem"}],"metrics":[{"name":"totalUsers"},{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"operatingSystem"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: tech_os_with_version_report
+      request:
+        body: '{"dimensions":[{"name":"date"},{"name":"operatingSystemWithVersion"}],"metrics":[{"name":"totalUsers"},{"name":"newUsers"},{"name":"engagedSessions"},{"name":"engagementRate"},{"name":"eventCount"},{"name":"conversions"},{"name":"totalRevenue"}],"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"orderBys":[{"dimension":{"dimensionName":"date"}},{"dimension":{"dimensionName":"operatingSystemWithVersion"}}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      missingIsEmpty: true
+      partitionField: _partition
+
+# Como cada stream é lido. Os filhos tiram as propriedades da tabela publicada do pai, desta
+# mesma fonte: o pai precisa ter rodado e publicado antes.
+streams:
+  - name: account_summaries
+    syncMode: full_refresh
+    primaryKey: [[account]]
+
+  - name: property_metadata
+    syncMode: full_refresh
+    primaryKey: [[name]]
+    partitions: &per_property
+      query: >-
+        SELECT DISTINCT
+          replaceOne(JSONExtractString(summary, 'property'), 'properties/', '') AS property_id
+        FROM {{table:account_summaries}}
+        ARRAY JOIN JSONExtractArrayRaw(propertySummaries) AS summary
+        WHERE property_id != ''
+        ORDER BY property_id
+
+  - name: daily_active_users
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: weekly_active_users
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: four_weekly_active_users
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: devices
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: locations
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: pages
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: traffic_sources
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: website_overview
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: user_acquisition_first_user_medium_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: user_acquisition_first_user_source_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: user_acquisition_first_user_source_medium_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: user_acquisition_first_user_source_platform_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: user_acquisition_first_user_campaign_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: user_acquisition_first_user_google_ads_ad_network_type_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: user_acquisition_first_user_google_ads_ad_group_name_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: traffic_acquisition_session_source_medium_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: traffic_acquisition_session_medium_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: traffic_acquisition_session_source_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: traffic_acquisition_session_campaign_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: traffic_acquisition_session_default_channel_grouping_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: traffic_acquisition_session_source_platform_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: events_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: weekly_events_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: conversions_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: pages_title_and_screen_class_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: pages_path_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: pages_title_and_screen_name_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: content_group_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: ecommerce_purchases_item_name_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: ecommerce_purchases_item_id_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: ecommerce_purchases_item_category_report_combined
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: ecommerce_purchases_item_category_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: ecommerce_purchases_item_category_2_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: ecommerce_purchases_item_category_3_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: ecommerce_purchases_item_category_4_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: ecommerce_purchases_item_category_5_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: ecommerce_purchases_item_brand_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: publisher_ads_ad_unit_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: publisher_ads_page_path_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: publisher_ads_ad_format_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: publisher_ads_ad_source_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: demographic_country_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: demographic_region_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: demographic_city_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: demographic_language_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: demographic_age_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: demographic_gender_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: demographic_interest_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: tech_browser_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: tech_device_category_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: tech_device_model_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: tech_screen_resolution_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: tech_app_version_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: tech_platform_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: tech_platform_device_category_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: tech_operating_system_report
+    syncMode: full_refresh
+    partitions: *per_property
+
+  - name: tech_os_with_version_report
+    syncMode: full_refresh
+    partitions: *per_property

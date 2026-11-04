@@ -49,6 +49,8 @@ manifest:
         urlTemplate: https://graph.facebook.com/v23.0/{{account}}
       params:
         fields: id,biography,ig_id,followers_count,follows_count,media_count,name,profile_picture_url,username,website
+      # A conta é um objeto só, não uma lista.
+      singleRecord: true
 
     - name: media
       request:
