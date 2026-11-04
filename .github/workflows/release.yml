@@ -21,9 +21,16 @@ jobs:
       - run: npm ci
       - run: npm run validate
       - run: npm run bundle -- "$GITHUB_REF_NAME"
-      - run: >
-          gh release create "$GITHUB_REF_NAME"
-          dist/connectors-bundle.json dist/connectors-bundle.json.sha256
-          --title "$GITHUB_REF_NAME" --generate-notes
+      # A release created by hand from the tag (GitHub's "Create release") gets the files
+      # attached instead of failing the run with "already exists".
+      - run: |
+          files="dist/connectors-bundle.json dist/connectors-bundle.json.sha256"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" $files --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" $files \
+              --title "$GITHUB_REF_NAME" --generate-notes
+          fi
+          cat dist/connectors-bundle.json.sha256
         env:
           GH_TOKEN: ${{ github.token }}
