@@ -64,3 +64,23 @@ manifesto HTTP só existem lá, porque o JSON Schema não consegue expressá-las
 Antes de trazer um conector da Airbyte, confira a licença no registro dela. A maioria é ELv2, que
 proíbe oferecer o software como serviço gerenciado a terceiros, e isso precisa de avaliação
 jurídica. Os conectores com licença MIT podem ser convertidos.
+
+Em 04/11/2026 o responsável decidiu traduzir três conectores ELv2: Instagram, Google Ads e GA4.
+A cópia sem modificação está em `vendor/airbyte/`, com o `LICENSE`. Todo conector traduzido:
+
+- tem o campo `origin`, com projeto, conector, versão, commit, licença e o que foi modificado. É
+  um campo, e não um comentário, porque o pacote é JSON e é ele a cópia distribuída;
+- começa com um comentário que aponta para `vendor/airbyte/LICENSE`.
+
+## Conectores (`connectors/`)
+
+Um conector é o manifesto HTTP e os streams da receita:
+
+- `manifest`: o que pedir. Cada stream pode ter o próprio `request` (caminho, método e corpo) e
+  uma lista `ignoreErrors` de respostas que significam "não há nada aqui", e não falha.
+- `streams`: como ler cada stream (modo e chave) e, num stream filho, o SELECT das partições.
+  `{{table:<stream>}}` é a tabela publicada daquele stream na mesma fonte: o pai precisa ter
+  rodado antes.
+
+A engine ainda não instancia conector do pacote. Isso é a fase 2 do plano
+(`docs/ingestao/conectores-airbyte-2026-11-04.md`, no monorepo).
