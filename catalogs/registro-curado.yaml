@@ -233,6 +233,18 @@ datasets:
   format: page
   checkedAt: '2026-10-28'
   measurement: zip por ano, 1995–2025, na própria página; 2025 é um xlsx de 199 MB com 268 abas
+- id: inep-microdados-censo-escolar
+  title: Microdados do Censo Escolar da Educação Básica
+  publisher: INEP
+  terms:
+  - microdados
+  - docentes
+  - turmas
+  - gestores
+  endpoint: https://www.gov.br/inep/pt-br/acesso-a-informacao/dados-abertos/microdados/censo-escolar
+  format: page
+  checkedAt: '2026-11-04'
+  measurement: zip por ano, 1995–2025; o de 2025 tem ~537 MB, com escola, matrícula, turma, docente e gestor em CSV e o dicionário em xlsx
 - id: datasus-cnes
   title: Estabelecimentos de saúde (CNES) e Farmácia Popular
   publisher: Ministério da Saúde · DATASUS
