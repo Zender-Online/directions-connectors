@@ -243,6 +243,19 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 200
+                },
+                "secretHeaders": {
+                  "default": {},
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9-]{1,60}$"
+                  },
+                  "additionalProperties": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
                 }
               },
               "required": [
@@ -563,6 +576,18 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "headers": {
+                    "default": {},
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9-]{1,60}$"
+                    },
+                    "additionalProperties": {
+                      "type": "string",
+                      "maxLength": 500
+                    }
                   }
                 },
                 "additionalProperties": false
