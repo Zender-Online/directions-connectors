@@ -1,0 +1,147 @@
+# yaml-language-server: $schema=../schema/connector.schema.json
+#
+# Escrito a partir da documentação pública da Meta, não de outro conector:
+#   mídias:    https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/media
+#   campos:    https://developers.facebook.com/docs/instagram-platform/reference/instagram-media
+#   métricas:  https://developers.facebook.com/docs/instagram-platform/reference/instagram-media/insights/
+#   da conta:  https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/insights
+# Conferido em 08/11/2026, na Graph API v27.0. É o Instagram com login do Facebook: a conta
+# profissional ligada a uma Página. `impressions` não entra: está descontinuada desde a v22.0.
+id: instagram
+title: Instagram
+publisher: Meta
+kind: http-declarative
+manifest:
+  version: 1
+  requester:
+    urlTemplate: https://graph.facebook.com/v27.0/me/accounts
+  # Token de acesso de usuário de longa duração; vence em cerca de 60 dias e a organização renova.
+  auth:
+    type: bearer
+    secretRef: access_token
+  # A Graph pagina por cursor em paging.cursors.after.
+  paginator:
+    type: cursor
+    param: after
+    cursorPath: [paging, cursors, after]
+  # A Graph conta chamadas por hora e por conta; folga para não esgotar a cota da organização.
+  rateLimit:
+    requestsPerMinute: 30
+  streams:
+    # As Páginas que o token alcança, com a conta do Instagram ligada a cada uma.
+    - name: pages
+      params:
+        fields: id,name,instagram_business_account{id,username}
+        limit: '100'
+        after: '{{cursor}}'
+      recordSelector: [data]
+      missingIsEmpty: true
+
+    - name: accounts
+      request:
+        urlTemplate: https://graph.facebook.com/v27.0/{{ig_user_id}}
+      paginator:
+        type: none
+      params:
+        fields: id,username,name,biography,website,followers_count,follows_count,media_count,profile_picture_url
+      singleRecord: true
+
+    # Até as 10 mil mídias mais recentes de cada conta; stories ficam no stream deles.
+    - name: media
+      request:
+        urlTemplate: https://graph.facebook.com/v27.0/{{ig_user_id}}/media
+      params:
+        fields: id,caption,media_type,media_product_type,permalink,shortcode,timestamp,like_count,comments_count
+        limit: '100'
+        after: '{{cursor}}'
+      recordSelector: [data]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    # Só os stories das últimas 24 horas: depois disso a API não os devolve mais.
+    - name: stories
+      request:
+        urlTemplate: https://graph.facebook.com/v27.0/{{ig_user_id}}/stories
+      params:
+        fields: id,media_type,media_product_type,permalink,timestamp
+        after: '{{cursor}}'
+      recordSelector: [data]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    # Uma requisição por mídia, com as métricas que valem para o tipo dela (ver a partição).
+    - name: media_insights
+      request:
+        urlTemplate: https://graph.facebook.com/v27.0/{{media_id}}/insights
+      paginator:
+        type: none
+      params:
+        metric: '{{metrics}}'
+      recordSelector: [data]
+      missingIsEmpty: true
+      partitionField: _partition
+      # Mídia publicada antes de a conta virar profissional não tem métricas, e a Graph responde 400.
+      # Uma dessas não pode derrubar as outras da mesma execução.
+      ignoreErrors:
+        - status: 400
+          match:
+            - path: [error, error_subcode]
+              equals: [2108006]
+
+    - name: story_insights
+      request:
+        urlTemplate: https://graph.facebook.com/v27.0/{{media_id}}/insights
+      paginator:
+        type: none
+      params:
+        metric: reach,views,replies,shares,follows,profile_visits,total_interactions
+      recordSelector: [data]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    # O total do último dia de cada conta: rodar todo dia monta a série.
+    - name: account_insights_daily
+      request:
+        urlTemplate: https://graph.facebook.com/v27.0/{{ig_user_id}}/insights
+      paginator:
+        type: none
+      params:
+        metric: reach,views,accounts_engaged,total_interactions,likes,comments,saves,shares,profile_links_taps
+        period: day
+        metric_type: total_value
+      recordSelector: [data]
+      missingIsEmpty: true
+      partitionField: _partition
+
+streams:
+  - name: pages
+    syncMode: full_refresh
+    primaryKey: [[id]]
+  - name: accounts
+    syncMode: full_refresh
+    primaryKey: [[id]]
+    partitions:
+      query: 'SELECT DISTINCT JSONExtractString(instagram_business_account, ''id'') AS ig_user_id FROM {{table:pages}} WHERE JSONExtractString(instagram_business_account, ''id'') != '''''
+  - name: media
+    syncMode: full_refresh
+    primaryKey: [[id]]
+    partitions:
+      query: 'SELECT DISTINCT id AS ig_user_id FROM {{table:accounts}} WHERE id != '''''
+  - name: stories
+    syncMode: full_refresh
+    primaryKey: [[id]]
+    partitions:
+      query: 'SELECT DISTINCT id AS ig_user_id FROM {{table:accounts}} WHERE id != '''''
+  - name: media_insights
+    syncMode: full_refresh
+    partitions:
+      # Álbum não tem métrica; reels ganham o tempo médio assistido.
+      query: 'SELECT id AS media_id, if(media_product_type = ''REELS'', ''reach,views,likes,comments,saved,shares,total_interactions,ig_reels_avg_watch_time'', ''reach,views,likes,comments,saved,shares,total_interactions'') AS metrics FROM {{table:media}} WHERE id != '''' AND media_type != ''CAROUSEL_ALBUM'''
+  - name: story_insights
+    syncMode: full_refresh
+    partitions:
+      query: 'SELECT id AS media_id FROM {{table:stories}} WHERE id != '''''
+  - name: account_insights_daily
+    syncMode: full_refresh
+    partitions:
+      query: 'SELECT DISTINCT id AS ig_user_id FROM {{table:accounts}} WHERE id != '''''
