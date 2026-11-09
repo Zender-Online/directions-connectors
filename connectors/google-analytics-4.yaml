@@ -1,0 +1,174 @@
+# yaml-language-server: $schema=../schema/connector.schema.json
+#
+# Escrito a partir da documentação pública do Google, não de outro conector:
+#   relatórios: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runReport
+#   campos:     https://developers.google.com/analytics/devguides/reporting/data/v1/api-schema
+#   contas:     https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/accountSummaries/list
+# Conferido em 08/11/2026. A seleção de relatórios é nossa: um por pergunta que um time de
+# marketing faz (de onde veio a visita, que página, que campanha, que item vendeu).
+id: google-analytics-4
+title: Google Analytics 4
+publisher: Google
+kind: http-declarative
+manifest:
+  version: 1
+  requester:
+    urlTemplate: https://analyticsdata.googleapis.com/v1beta/properties/{{property_id}}:runReport
+    method: POST
+    headers:
+      content-type: application/json
+  auth:
+    type: oauth2
+    tokenUrl: https://oauth2.googleapis.com/token
+    clientIdRef: client_id
+    clientSecretRef: client_secret
+    refreshTokenRef: refresh_token
+  # O runReport pagina por limit/offset no corpo e diz o total em rowCount. 100 mil linhas por
+  # página, abaixo do teto de 250 mil por requisição.
+  paginator:
+    type: offset
+    param: offset
+    sizeParam: limit
+    size: 100000
+    totalPath: [rowCount]
+  rateLimit:
+    requestsPerMinute: 30
+  streams:
+    # As propriedades saem do que a credencial enxerga: a organização não digita id nenhum.
+    - name: account_summaries
+      request:
+        urlTemplate: https://analyticsadmin.googleapis.com/v1beta/accountSummaries?pageSize=200
+        method: GET
+      params:
+        pageToken: '{{cursor}}'
+      paginator:
+        type: cursor
+        param: pageToken
+        cursorPath: [nextPageToken]
+      recordSelector: [accountSummaries]
+      missingIsEmpty: true
+
+    - name: users_daily
+      request:
+        body: '{"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"dimensions":[{"name":"date"}],"metrics":[{"name":"activeUsers"},{"name":"newUsers"},{"name":"totalUsers"},{"name":"sessions"},{"name":"engagedSessions"},{"name":"averageSessionDuration"},{"name":"bounceRate"},{"name":"screenPageViews"}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      # Relatório sem dado no período vem sem `rows`.
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: traffic_daily
+      request:
+        body: '{"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"dimensions":[{"name":"date"},{"name":"sessionDefaultChannelGroup"},{"name":"sessionSource"},{"name":"sessionMedium"}],"metrics":[{"name":"sessions"},{"name":"engagedSessions"},{"name":"activeUsers"},{"name":"newUsers"},{"name":"keyEvents"},{"name":"totalRevenue"}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      # Relatório sem dado no período vem sem `rows`.
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: campaigns_daily
+      request:
+        body: '{"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"dimensions":[{"name":"date"},{"name":"sessionCampaignName"},{"name":"sessionSource"},{"name":"sessionMedium"}],"metrics":[{"name":"sessions"},{"name":"activeUsers"},{"name":"keyEvents"},{"name":"totalRevenue"}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      # Relatório sem dado no período vem sem `rows`.
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: pages_daily
+      request:
+        body: '{"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"dimensions":[{"name":"date"},{"name":"hostName"},{"name":"pagePath"},{"name":"pageTitle"}],"metrics":[{"name":"screenPageViews"},{"name":"activeUsers"},{"name":"userEngagementDuration"},{"name":"eventCount"}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      # Relatório sem dado no período vem sem `rows`.
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: landing_pages_daily
+      request:
+        body: '{"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"dimensions":[{"name":"date"},{"name":"landingPage"}],"metrics":[{"name":"sessions"},{"name":"engagedSessions"},{"name":"activeUsers"},{"name":"newUsers"},{"name":"keyEvents"}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      # Relatório sem dado no período vem sem `rows`.
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: events_daily
+      request:
+        body: '{"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"dimensions":[{"name":"date"},{"name":"eventName"}],"metrics":[{"name":"eventCount"},{"name":"totalUsers"}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      # Relatório sem dado no período vem sem `rows`.
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: geography_daily
+      request:
+        body: '{"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"dimensions":[{"name":"date"},{"name":"country"},{"name":"region"},{"name":"city"}],"metrics":[{"name":"activeUsers"},{"name":"newUsers"},{"name":"sessions"}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      # Relatório sem dado no período vem sem `rows`.
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: technology_daily
+      request:
+        body: '{"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"dimensions":[{"name":"date"},{"name":"deviceCategory"},{"name":"operatingSystem"},{"name":"browser"}],"metrics":[{"name":"activeUsers"},{"name":"sessions"},{"name":"screenPageViews"}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      # Relatório sem dado no período vem sem `rows`.
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: ecommerce_items_daily
+      request:
+        body: '{"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"dimensions":[{"name":"date"},{"name":"itemId"},{"name":"itemName"},{"name":"itemCategory"}],"metrics":[{"name":"itemsViewed"},{"name":"itemsAddedToCart"},{"name":"itemsPurchased"},{"name":"itemRevenue"}],"keepEmptyRows":false,"limit":{{size}},"offset":{{offset}}}'
+      recordSelector: [rows]
+      # Relatório sem dado no período vem sem `rows`.
+      missingIsEmpty: true
+      partitionField: _partition
+
+# Cada relatório roda uma vez por propriedade. As linhas ficam como a API devolve:
+# dimensionValues e metricValues na ordem pedida no corpo, e a propriedade em _partition.
+# Dar nome a cada valor é o SELECT do CLEAR, sobre o RAW.
+streams:
+  - name: account_summaries
+    syncMode: full_refresh
+    primaryKey: [[account]]
+  # Usuários, sessões e engajamento por dia, últimos 30 dias até ontem.
+  - name: users_daily
+    syncMode: full_refresh
+    partitions:
+      query: 'SELECT DISTINCT replaceOne(JSONExtractString(p, ''property''), ''properties/'', '''') AS property_id FROM {{table:account_summaries}} ARRAY JOIN JSONExtractArrayRaw(propertySummaries) AS p WHERE JSONExtractString(p, ''property'') != '''''
+  # Sessões por canal, origem e mídia, últimos 30 dias até ontem.
+  - name: traffic_daily
+    syncMode: full_refresh
+    partitions:
+      query: 'SELECT DISTINCT replaceOne(JSONExtractString(p, ''property''), ''properties/'', '''') AS property_id FROM {{table:account_summaries}} ARRAY JOIN JSONExtractArrayRaw(propertySummaries) AS p WHERE JSONExtractString(p, ''property'') != '''''
+  # Sessões por campanha, últimos 30 dias até ontem.
+  - name: campaigns_daily
+    syncMode: full_refresh
+    partitions:
+      query: 'SELECT DISTINCT replaceOne(JSONExtractString(p, ''property''), ''properties/'', '''') AS property_id FROM {{table:account_summaries}} ARRAY JOIN JSONExtractArrayRaw(propertySummaries) AS p WHERE JSONExtractString(p, ''property'') != '''''
+  # Visualizações por página, últimos 30 dias até ontem.
+  - name: pages_daily
+    syncMode: full_refresh
+    partitions:
+      query: 'SELECT DISTINCT replaceOne(JSONExtractString(p, ''property''), ''properties/'', '''') AS property_id FROM {{table:account_summaries}} ARRAY JOIN JSONExtractArrayRaw(propertySummaries) AS p WHERE JSONExtractString(p, ''property'') != '''''
+  # Sessões por página de entrada, últimos 30 dias até ontem.
+  - name: landing_pages_daily
+    syncMode: full_refresh
+    partitions:
+      query: 'SELECT DISTINCT replaceOne(JSONExtractString(p, ''property''), ''properties/'', '''') AS property_id FROM {{table:account_summaries}} ARRAY JOIN JSONExtractArrayRaw(propertySummaries) AS p WHERE JSONExtractString(p, ''property'') != '''''
+  # Eventos por nome, últimos 30 dias até ontem.
+  - name: events_daily
+    syncMode: full_refresh
+    partitions:
+      query: 'SELECT DISTINCT replaceOne(JSONExtractString(p, ''property''), ''properties/'', '''') AS property_id FROM {{table:account_summaries}} ARRAY JOIN JSONExtractArrayRaw(propertySummaries) AS p WHERE JSONExtractString(p, ''property'') != '''''
+  # Usuários por país, região e cidade, últimos 30 dias até ontem.
+  - name: geography_daily
+    syncMode: full_refresh
+    partitions:
+      query: 'SELECT DISTINCT replaceOne(JSONExtractString(p, ''property''), ''properties/'', '''') AS property_id FROM {{table:account_summaries}} ARRAY JOIN JSONExtractArrayRaw(propertySummaries) AS p WHERE JSONExtractString(p, ''property'') != '''''
+  # Usuários por dispositivo, sistema e navegador, últimos 30 dias até ontem.
+  - name: technology_daily
+    syncMode: full_refresh
+    partitions:
+      query: 'SELECT DISTINCT replaceOne(JSONExtractString(p, ''property''), ''properties/'', '''') AS property_id FROM {{table:account_summaries}} ARRAY JOIN JSONExtractArrayRaw(propertySummaries) AS p WHERE JSONExtractString(p, ''property'') != '''''
+  # Itens vistos, adicionados e comprados, últimos 30 dias até ontem.
+  - name: ecommerce_items_daily
+    syncMode: full_refresh
+    partitions:
+      query: 'SELECT DISTINCT replaceOne(JSONExtractString(p, ''property''), ''properties/'', '''') AS property_id FROM {{table:account_summaries}} ARRAY JOIN JSONExtractArrayRaw(propertySummaries) AS p WHERE JSONExtractString(p, ''property'') != '''''

@@ -4,6 +4,25 @@ Os catálogos e conectores globais da ingestão do Directions: o que toda organi
 agente procura um dado. Catálogos que uma organização cadastra para si, como um portal interno com
 credencial, não moram aqui: ficam no banco da engine (`data_catalog`).
 
+## Conector → catálogo → item
+
+Toda fonte segue a mesma estrutura:
+
+- **Conector**: o código que lê um TIPO de fonte, com os parâmetros que esse tipo pede.
+- **Catálogo**: um conector com os parâmetros preenchidos. É a lista do que dá para importar dali.
+- **Item**: o que se importa. Vira uma fonte com receita na engine.
+
+| Conector | Parâmetro | Item |
+| -------- | --------- | ---- |
+| `ckan` (embutido) | a URL do portal | um conjunto de dados, com os seus arquivos |
+| `dados_gov_br` (embutido) | a URL e a chave da API | um conjunto de dados |
+| `curated` (embutido) | nenhum: os itens estão no arquivo | um conjunto sondado à mão |
+| `connectors/<id>.yaml` (GA4, Google Ads, Instagram) | a credencial da organização | um stream |
+
+Os embutidos têm o código na engine e por isso não têm arquivo em `connectors/`. O campo
+`connector` de cada `catalogs/<id>.yaml` diz de qual deles o catálogo é. O porquê e o que falta
+estão em `docs/ingestao/catalogos-e-conectores.md`, no monorepo do Directions.
+
 ## O que tem aqui
 
 | Pasta          | O que é                                                                         |
@@ -11,6 +30,7 @@ credencial, não moram aqui: ficam no banco da engine (`data_catalog`).
 | `catalogs/`    | Um arquivo por catálogo: um portal CKAN, o dados.gov.br ou um catálogo curado.   |
 | `connectors/`  | Um arquivo por conector declarativo: a API de um app, lida pela fonte HTTP.     |
 | `schema/`      | O JSON Schema dos dois tipos de arquivo, gerado do monorepo. Não editar à mão.  |
+| `index/`       | PROPOSTO, ainda não existe: os itens de cada catálogo, colhidos pelo CI.       |
 
 O catálogo curado (`catalogs/registro-curado.yaml`) veio do antigo `source-registry.ts`. A regra
 dele continua valendo: todo endereço foi sondado, e `checkedAt` diz quando respondeu. Um conjunto
@@ -64,3 +84,23 @@ manifesto HTTP só existem lá, porque o JSON Schema não consegue expressá-las
 Antes de trazer um conector da Airbyte, confira a licença no registro dela. A maioria é ELv2, que
 proíbe oferecer o software como serviço gerenciado a terceiros, e isso precisa de avaliação
 jurídica. Os conectores com licença MIT podem ser convertidos.
+
+Em 04/11/2026 o responsável decidiu traduzir três conectores ELv2: Instagram, Google Ads e GA4.
+A cópia sem modificação está em `vendor/airbyte/`, com o `LICENSE`. Todo conector traduzido:
+
+- tem o campo `origin`, com projeto, conector, versão, commit, licença e o que foi modificado. É
+  um campo, e não um comentário, porque o pacote é JSON e é ele a cópia distribuída;
+- começa com um comentário que aponta para `vendor/airbyte/LICENSE`.
+
+## Conectores (`connectors/`)
+
+Um conector é o manifesto HTTP e os streams da receita:
+
+- `manifest`: o que pedir. Cada stream pode ter o próprio `request` (caminho, método e corpo) e
+  uma lista `ignoreErrors` de respostas que significam "não há nada aqui", e não falha.
+- `streams`: como ler cada stream (modo e chave) e, num stream filho, o SELECT das partições.
+  `{{table:<stream>}}` é a tabela publicada daquele stream na mesma fonte: o pai precisa ter
+  rodado antes.
+
+A engine ainda não instancia conector do pacote. Isso é a fase 2 do plano
+(`docs/ingestao/conectores-airbyte-2026-11-04.md`, no monorepo).
