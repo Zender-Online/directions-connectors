@@ -1,32 +1,21 @@
 # yaml-language-server: $schema=../schema/connector.schema.json
 #
-# Traduzido de airbytehq/airbyte source-google-ads 6.1.9, commit
-# e8cdbb81b382fefdb662670e74342c073f7ccb4b. Elastic License 2.0: ver vendor/airbyte/LICENSE.
-# MODIFICADO: o campo `origin.modifications` abaixo diz o quê.
+# Escrito a partir da documentação pública do Google, não de outro conector:
+#   consulta: https://developers.google.com/google-ads/api/rest/common/search
+#   campos:   https://developers.google.com/google-ads/api/fields/v26/campaign (e customer_client,
+#             ad_group_criterion, keyword_view)
+#   versões:  https://developers.google.com/google-ads/api/docs/release-notes
+# Conferido em 08/11/2026, na v26 (lançada em 14/10/2026). Cada versão do Google Ads vive cerca
+# de um ano: trocar a versão é uma tag nova deste repositório, e a receita pede nova aprovação.
+# Termos de busca e região ficaram de fora: os campos não foram confirmados na v26.
 id: google-ads
-title: Google Ads (contas, campanhas, grupos, anúncios e métricas)
+title: Google Ads
 publisher: Google
 kind: http-declarative
-origin:
-  project: airbytehq/airbyte
-  connector: source-google-ads
-  version: 6.1.9
-  commit: e8cdbb81b382fefdb662670e74342c073f7ccb4b
-  license: Elastic-2.0
-  modifications: >-
-    Reescrito no formato http-declarative do Directions, só com accessible_accounts,
-    customer_client, customer, campaign, ad_group, ad_group_ad e account_performance_report, com
-    as mesmas listas de campos do Airbyte. Lê por googleAds:search, paginado por pageToken no
-    corpo, em vez de googleAds:searchStream. As contas cliente saem do customer_client de cada
-    conta acessível, e o login-customer-id é a conta pela qual o cliente foi alcançado, como no
-    Airbyte. A janela é fixa, dos últimos 30 dias (DURING LAST_30_DAYS), em vez do cursor
-    incremental. O 403 é ignorado só quando a conta não está habilitada (CUSTOMER_NOT_ENABLED),
-    e não para todo 403. Os demais streams, as consultas GAQL próprias e as transformações em
-    Python ficam de fora.
 manifest:
   version: 1
   requester:
-    urlTemplate: https://googleads.googleapis.com/v23/customers/{{customer_id}}/googleAds:search
+    urlTemplate: https://googleads.googleapis.com/v26/customers/{{customer_id}}/googleAds:search
     method: POST
     headers:
       content-type: application/json
@@ -36,10 +25,11 @@ manifest:
     clientIdRef: client_id
     clientSecretRef: client_secret
     refreshTokenRef: refresh_token
-    # O developer-token é da organização, aprovado pelo Google, e vai em todo pedido.
+    # O Google pede o developer-token da organização em toda requisição, além do token de acesso.
     secretHeaders:
       developer-token: developer_token
-  # O googleAds:search pagina de 10 mil em 10 mil linhas, e o pageToken vai no corpo.
+  # `search`, e não `searchStream`: o stream devolve uma lista de lotes, e o seletor de registros
+  # anda por objeto. O `search` devolve `results` e `nextPageToken`, que volta no corpo.
   paginator:
     type: cursor
     param: pageToken
@@ -47,124 +37,97 @@ manifest:
   rateLimit:
     requestsPerMinute: 60
   streams:
-    # As contas que a credencial alcança direto. É o pai de todos os outros.
+    # As contas que a credencial alcança diretamente: `customers/123`, uma por registro.
     - name: accessible_customers
       request:
-        urlTemplate: https://googleads.googleapis.com/v23/customers:listAccessibleCustomers
+        urlTemplate: https://googleads.googleapis.com/v26/customers:listAccessibleCustomers
         method: GET
       paginator:
         type: none
       recordSelector: [resourceNames]
       missingIsEmpty: true
 
-    # As contas abaixo de cada conta acessível, ela inclusive. Um gerente (MCC) alcança os
-    # clientes dele por aqui.
-    - name: customer_client
+    # A hierarquia abaixo de cada conta alcançada: uma conta de gerente lista os clientes dela.
+    - name: customer_clients
       request:
+        urlTemplate: https://googleads.googleapis.com/v26/customers/{{login_customer_id}}/googleAds:search
+        body: '{"query":"SELECT customer_client.id, customer_client.descriptive_name, customer_client.manager, customer_client.level, customer_client.status, customer_client.currency_code, customer_client.time_zone, customer_client.client_customer FROM customer_client","pageToken":"{{cursor}}"}'
         headers:
-          login-customer-id: "{{customer_id}}"
-        body: '{"query":"SELECT customer_client.client_customer, customer_client.level, customer_client.id, customer_client.manager, customer_client.time_zone, customer_client.status FROM customer_client","pageToken":"{{cursor}}"}'
+          login-customer-id: '{{login_customer_id}}'
       recordSelector: [results]
       missingIsEmpty: true
       partitionField: _partition
-      ignoreErrors: &not_enabled
-        # Conta ainda não habilitada ou desativada: o Airbyte ignora todo 403; aqui, só este.
-        - status: 403
-          match:
-            - path: [error, details, "0", errors, "0", errorCode, authorizationError]
-              equals: [CUSTOMER_NOT_ENABLED]
 
-    - name: customer
+    - name: campaigns
       request:
+        body: '{"query":"SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, campaign.bidding_strategy_type, campaign.campaign_budget, campaign.start_date_time, campaign.end_date_time FROM campaign","pageToken":"{{cursor}}"}'
         headers:
-          login-customer-id: "{{login_customer_id}}"
-        body: '{"query":"SELECT customer.auto_tagging_enabled, customer.call_reporting_setting.call_conversion_action, customer.call_reporting_setting.call_conversion_reporting_enabled, customer.call_reporting_setting.call_reporting_enabled, customer.conversion_tracking_setting.conversion_tracking_id, customer.conversion_tracking_setting.cross_account_conversion_tracking_id, customer.currency_code, customer.descriptive_name, customer.final_url_suffix, customer.has_partners_badge, customer.id, customer.manager, customer.optimization_score, customer.optimization_score_weight, customer.pay_per_conversion_eligibility_failure_reasons, customer.remarketing_setting.google_global_site_tag, customer.resource_name, customer.test_account, customer.time_zone, customer.tracking_url_template, segments.date FROM customer WHERE segments.date DURING LAST_30_DAYS ORDER BY segments.date ASC","pageToken":"{{cursor}}"}'
+          login-customer-id: '{{login_customer_id}}'
       recordSelector: [results]
       missingIsEmpty: true
       partitionField: _partition
-      ignoreErrors: *not_enabled
 
-    - name: campaign
+    - name: campaigns_daily
       request:
+        body: '{"query":"SELECT segments.date, campaign.id, campaign.name, metrics.impressions, metrics.clicks, metrics.interactions, metrics.cost_micros, metrics.conversions, metrics.conversions_value FROM campaign WHERE segments.date DURING LAST_30_DAYS","pageToken":"{{cursor}}"}'
         headers:
-          login-customer-id: "{{login_customer_id}}"
-        body: '{"query":"SELECT campaign.accessible_bidding_strategy, campaign.ad_serving_optimization_status, campaign.advertising_channel_sub_type, campaign.advertising_channel_type, campaign.app_campaign_setting.app_id, campaign.app_campaign_setting.app_store, campaign.app_campaign_setting.bidding_strategy_goal_type, campaign.base_campaign, campaign.bidding_strategy, campaign.bidding_strategy_type, campaign.campaign_budget, campaign_budget.amount_micros, campaign.commission.commission_rate_micros, campaign.dynamic_search_ads_setting.domain_name, campaign.dynamic_search_ads_setting.language_code, campaign.dynamic_search_ads_setting.use_supplied_urls_only, campaign.end_date_time, campaign.excluded_parent_asset_field_types, campaign.experiment_type, campaign.final_url_suffix, campaign.frequency_caps, campaign.geo_target_type_setting.negative_geo_target_type, campaign.geo_target_type_setting.positive_geo_target_type, campaign.hotel_setting.hotel_center_id, campaign.id, campaign.labels, campaign.local_campaign_setting.location_source_type, campaign.manual_cpc.enhanced_cpc_enabled, campaign.manual_cpm, campaign.manual_cpv, campaign.maximize_conversion_value.target_roas, campaign.maximize_conversions.target_cpa_micros, campaign.name, campaign.network_settings.target_content_network, campaign.network_settings.target_google_search, campaign.network_settings.target_partner_search_network, campaign.network_settings.target_search_network, campaign.optimization_goal_setting.optimization_goal_types, campaign.optimization_score, campaign.payment_mode, campaign.percent_cpc.cpc_bid_ceiling_micros, campaign.percent_cpc.enhanced_cpc_enabled, campaign.real_time_bidding_setting.opt_in, campaign.resource_name, campaign.selective_optimization.conversion_actions, campaign.serving_status, campaign.shopping_setting.campaign_priority, campaign.shopping_setting.enable_local, campaign.shopping_setting.merchant_id, campaign.start_date_time, campaign.status, campaign.target_cpa.cpc_bid_ceiling_micros, campaign.target_cpa.cpc_bid_floor_micros, campaign.target_cpa.target_cpa_micros, campaign.target_cpm.target_frequency_goal.target_count, campaign.target_cpm.target_frequency_goal.time_unit, campaign.target_impression_share.cpc_bid_ceiling_micros, campaign.target_impression_share.location, campaign.target_impression_share.location_fraction_micros, campaign.target_roas.cpc_bid_ceiling_micros, campaign.target_roas.cpc_bid_floor_micros, campaign.target_roas.target_roas, campaign.target_spend.cpc_bid_ceiling_micros, campaign.target_spend.target_spend_micros, campaign.targeting_setting.target_restrictions, campaign.tracking_setting.tracking_url, campaign.tracking_url_template, campaign.url_custom_parameters, campaign.vanity_pharma.vanity_pharma_display_url_mode, campaign.vanity_pharma.vanity_pharma_text, campaign.video_brand_safety_suitability, metrics.clicks, metrics.ctr, metrics.conversions, metrics.conversions_value, metrics.cost_micros, metrics.impressions, metrics.video_trueview_views, metrics.video_quartile_p100_rate, metrics.active_view_cpm, metrics.active_view_ctr, metrics.active_view_impressions, metrics.active_view_measurability, metrics.active_view_measurable_cost_micros, metrics.active_view_measurable_impressions, metrics.active_view_viewability, metrics.average_cost, metrics.average_cpc, metrics.average_cpm, metrics.interactions, metrics.interaction_event_types, metrics.value_per_conversion, metrics.cost_per_conversion, segments.date, segments.hour, segments.ad_network_type FROM campaign WHERE segments.date DURING LAST_30_DAYS ORDER BY segments.date ASC","pageToken":"{{cursor}}"}'
+          login-customer-id: '{{login_customer_id}}'
       recordSelector: [results]
       missingIsEmpty: true
       partitionField: _partition
-      ignoreErrors: *not_enabled
 
-    - name: ad_group
+    - name: ad_groups_daily
       request:
+        body: '{"query":"SELECT segments.date, campaign.id, ad_group.id, ad_group.name, ad_group.status, metrics.impressions, metrics.clicks, metrics.interactions, metrics.cost_micros, metrics.conversions, metrics.conversions_value FROM ad_group WHERE segments.date DURING LAST_30_DAYS","pageToken":"{{cursor}}"}'
         headers:
-          login-customer-id: "{{login_customer_id}}"
-        body: '{"query":"SELECT campaign.id, ad_group.ad_rotation_mode, ad_group.base_ad_group, ad_group.campaign, metrics.cost_micros, ad_group.cpc_bid_micros, ad_group.cpm_bid_micros, ad_group.cpv_bid_micros, ad_group.display_custom_bid_dimension, ad_group.effective_target_cpa_micros, ad_group.effective_target_cpa_source, ad_group.effective_target_roas, ad_group.effective_target_roas_source, ad_group.excluded_parent_asset_field_types, ad_group.optimized_targeting_enabled, ad_group.final_url_suffix, ad_group.id, ad_group.labels, ad_group.name, ad_group.percent_cpc_bid_micros, ad_group.resource_name, ad_group.status, ad_group.target_cpa_micros, ad_group.target_cpm_micros, ad_group.target_roas, ad_group.targeting_setting.target_restrictions, ad_group.tracking_url_template, ad_group.type, ad_group.url_custom_parameters, segments.date FROM ad_group WHERE segments.date DURING LAST_30_DAYS ORDER BY segments.date ASC","pageToken":"{{cursor}}"}'
+          login-customer-id: '{{login_customer_id}}'
       recordSelector: [results]
       missingIsEmpty: true
       partitionField: _partition
-      ignoreErrors: *not_enabled
 
-    - name: ad_group_ad
+    - name: keywords_daily
       request:
+        body: '{"query":"SELECT segments.date, campaign.id, ad_group.id, ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, metrics.impressions, metrics.clicks, metrics.interactions, metrics.cost_micros, metrics.conversions, metrics.conversions_value FROM keyword_view WHERE segments.date DURING LAST_30_DAYS","pageToken":"{{cursor}}"}'
         headers:
-          login-customer-id: "{{login_customer_id}}"
-        body: '{"query":"SELECT ad_group.id, ad_group_ad.ad.added_by_google_ads, ad_group_ad.ad.app_ad.descriptions, ad_group_ad.ad.app_ad.headlines, ad_group_ad.ad.app_ad.html5_media_bundles, ad_group_ad.ad.app_ad.images, ad_group_ad.ad.app_ad.mandatory_ad_text, ad_group_ad.ad.app_ad.youtube_videos, ad_group_ad.ad.app_engagement_ad.descriptions, ad_group_ad.ad.app_engagement_ad.headlines, ad_group_ad.ad.app_engagement_ad.images, ad_group_ad.ad.app_engagement_ad.videos, ad_group_ad.ad.device_preference, ad_group_ad.ad.display_upload_ad.display_upload_product_type, ad_group_ad.ad.display_upload_ad.media_bundle, ad_group_ad.ad.display_url, ad_group_ad.ad.expanded_dynamic_search_ad.description, ad_group_ad.ad.expanded_dynamic_search_ad.description2, ad_group_ad.ad.expanded_text_ad.description, ad_group_ad.ad.expanded_text_ad.description2, ad_group_ad.ad.expanded_text_ad.headline_part1, ad_group_ad.ad.expanded_text_ad.headline_part2, ad_group_ad.ad.expanded_text_ad.headline_part3, ad_group_ad.ad.expanded_text_ad.path1, ad_group_ad.ad.expanded_text_ad.path2, ad_group_ad.ad.final_app_urls, ad_group_ad.ad.final_mobile_urls, ad_group_ad.ad.final_url_suffix, ad_group_ad.ad.final_urls, ad_group_ad.ad.hotel_ad, ad_group_ad.ad.id, ad_group_ad.ad.image_ad.image_url, ad_group_ad.ad.image_ad.mime_type, ad_group_ad.ad.image_ad.name, ad_group_ad.ad.image_ad.pixel_height, ad_group_ad.ad.image_ad.pixel_width, ad_group_ad.ad.image_ad.preview_image_url, ad_group_ad.ad.image_ad.preview_pixel_height, ad_group_ad.ad.image_ad.preview_pixel_width, ad_group_ad.ad.legacy_app_install_ad, ad_group_ad.ad.legacy_responsive_display_ad.accent_color, ad_group_ad.ad.legacy_responsive_display_ad.allow_flexible_color, ad_group_ad.ad.legacy_responsive_display_ad.business_name, ad_group_ad.ad.legacy_responsive_display_ad.call_to_action_text, ad_group_ad.ad.legacy_responsive_display_ad.description, ad_group_ad.ad.legacy_responsive_display_ad.format_setting, ad_group_ad.ad.legacy_responsive_display_ad.logo_image, ad_group_ad.ad.legacy_responsive_display_ad.long_headline, ad_group_ad.ad.legacy_responsive_display_ad.main_color, ad_group_ad.ad.legacy_responsive_display_ad.marketing_image, ad_group_ad.ad.legacy_responsive_display_ad.price_prefix, ad_group_ad.ad.legacy_responsive_display_ad.promo_text, ad_group_ad.ad.legacy_responsive_display_ad.short_headline, ad_group_ad.ad.legacy_responsive_display_ad.square_logo_image, ad_group_ad.ad.legacy_responsive_display_ad.square_marketing_image, ad_group_ad.ad.local_ad.call_to_actions, ad_group_ad.ad.local_ad.descriptions, ad_group_ad.ad.local_ad.headlines, ad_group_ad.ad.local_ad.logo_images, ad_group_ad.ad.local_ad.marketing_images, ad_group_ad.ad.local_ad.path1, ad_group_ad.ad.local_ad.path2, ad_group_ad.ad.local_ad.videos, ad_group_ad.ad.name, ad_group_ad.ad.resource_name, ad_group_ad.ad.responsive_display_ad.accent_color, ad_group_ad.ad.responsive_display_ad.allow_flexible_color, ad_group_ad.ad.responsive_display_ad.business_name, ad_group_ad.ad.responsive_display_ad.call_to_action_text, ad_group_ad.ad.responsive_display_ad.control_spec.enable_asset_enhancements, ad_group_ad.ad.responsive_display_ad.control_spec.enable_autogen_video, ad_group_ad.ad.responsive_display_ad.descriptions, ad_group_ad.ad.responsive_display_ad.format_setting, ad_group_ad.ad.responsive_display_ad.headlines, ad_group_ad.ad.responsive_display_ad.logo_images, ad_group_ad.ad.responsive_display_ad.long_headline, ad_group_ad.ad.responsive_display_ad.main_color, ad_group_ad.ad.responsive_display_ad.marketing_images, ad_group_ad.ad.responsive_display_ad.price_prefix, ad_group_ad.ad.responsive_display_ad.promo_text, ad_group_ad.ad.responsive_display_ad.square_logo_images, ad_group_ad.ad.responsive_display_ad.square_marketing_images, ad_group_ad.ad.responsive_display_ad.youtube_videos, ad_group_ad.ad.responsive_search_ad.descriptions, ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.path1, ad_group_ad.ad.responsive_search_ad.path2, ad_group_ad.ad.shopping_comparison_listing_ad.headline, ad_group_ad.ad.shopping_product_ad, ad_group_ad.ad.shopping_smart_ad, ad_group_ad.ad.smart_campaign_ad.descriptions, ad_group_ad.ad.smart_campaign_ad.headlines, ad_group_ad.ad.system_managed_resource_source, ad_group_ad.ad.text_ad.description1, ad_group_ad.ad.text_ad.description2, ad_group_ad.ad.text_ad.headline, ad_group_ad.ad.tracking_url_template, ad_group_ad.ad.type, ad_group_ad.ad.url_collections, ad_group_ad.ad.url_custom_parameters, ad_group_ad.ad.video_ad.in_feed.description1, ad_group_ad.ad.video_ad.in_feed.description2, ad_group_ad.ad.video_ad.in_feed.headline, ad_group_ad.ad.video_ad.in_stream.action_button_label, ad_group_ad.ad.video_ad.in_stream.action_headline, ad_group_ad.ad.video_ad.out_stream.description, ad_group_ad.ad.video_ad.out_stream.headline, ad_group_ad.ad.video_responsive_ad.call_to_actions, ad_group_ad.ad.video_responsive_ad.companion_banners, ad_group_ad.ad.video_responsive_ad.descriptions, ad_group_ad.ad.video_responsive_ad.headlines, ad_group_ad.ad.video_responsive_ad.long_headlines, ad_group_ad.ad.video_responsive_ad.videos, ad_group_ad.ad_group, ad_group_ad.ad_strength, ad_group_ad.labels, ad_group_ad.policy_summary.approval_status, ad_group_ad.policy_summary.policy_topic_entries, ad_group_ad.policy_summary.review_status, ad_group_ad.resource_name, ad_group_ad.status, segments.date FROM ad_group_ad WHERE segments.date DURING LAST_30_DAYS ORDER BY segments.date ASC","pageToken":"{{cursor}}"}'
+          login-customer-id: '{{login_customer_id}}'
       recordSelector: [results]
       missingIsEmpty: true
       partitionField: _partition
-      ignoreErrors: *not_enabled
 
-    - name: account_performance_report
-      request:
-        headers:
-          login-customer-id: "{{login_customer_id}}"
-        body: '{"query":"SELECT customer.currency_code, customer.descriptive_name, customer.time_zone, metrics.active_view_cpm, metrics.active_view_ctr, metrics.active_view_impressions, metrics.active_view_measurability, metrics.active_view_measurable_cost_micros, metrics.active_view_measurable_impressions, metrics.active_view_viewability, segments.ad_network_type, metrics.all_conversions_from_interactions_rate, metrics.all_conversions_value, metrics.all_conversions, metrics.average_cost, metrics.average_cpc, metrics.average_cpe, metrics.average_cpm, metrics.trueview_average_cpv, customer.manager, metrics.clicks, metrics.content_budget_lost_impression_share, metrics.content_impression_share, metrics.content_rank_lost_impression_share, metrics.conversions_from_interactions_rate, metrics.conversions_value, metrics.conversions, metrics.cost_micros, metrics.cost_per_all_conversions, metrics.cost_per_conversion, metrics.cross_device_conversions, metrics.ctr, segments.date, segments.day_of_week, segments.device, metrics.engagement_rate, metrics.engagements, customer.id, metrics.impressions, metrics.interaction_rate, metrics.interaction_event_types, metrics.interactions, customer.auto_tagging_enabled, customer.test_account, segments.month, segments.quarter, metrics.search_budget_lost_impression_share, metrics.search_exact_match_impression_share, metrics.search_impression_share, metrics.search_rank_lost_impression_share, metrics.value_per_all_conversions, metrics.value_per_conversion, metrics.video_trueview_view_rate, metrics.video_trueview_views, metrics.view_through_conversions, segments.week, segments.year FROM customer WHERE segments.date DURING LAST_30_DAYS ORDER BY segments.date ASC","pageToken":"{{cursor}}"}'
-      recordSelector: [results]
-      missingIsEmpty: true
-      partitionField: _partition
-      ignoreErrors: *not_enabled
-
-# Como cada stream é lido. Os filhos tiram as partições da tabela publicada do pai, desta
-# mesma fonte: o pai precisa ter rodado e publicado antes.
+# Os valores em dinheiro vêm em micros (cost_micros / 1e6) e na moeda da conta, que está em
+# customer_clients. Converter e dar nome é o SELECT do CLEAR, sobre o RAW.
 streams:
   - name: accessible_customers
     syncMode: full_refresh
-
-  - name: customer_client
+  - name: customer_clients
     syncMode: full_refresh
     partitions:
-      query: >-
-        SELECT replaceOne(value, 'customers/', '') AS customer_id
-        FROM {{table:accessible_customers}}
-        WHERE customer_id != ''
-        ORDER BY customer_id
-
-  - name: customer
+      query: 'SELECT DISTINCT replaceOne(value, ''customers/'', '''') AS login_customer_id FROM {{table:accessible_customers}} WHERE value LIKE ''customers/%'''
+  # Campanhas: nome, situação, canal, lance e orçamento.
+  - name: campaigns
     syncMode: full_refresh
-    partitions: &per_client
-      # Uma conta cliente por linha, sem gerente (gerente não tem métrica), com a conta pela
-      # qual foi alcançada. Alcançada por dois gerentes, vale o primeiro em ordem de texto, para
-      # a escolha ser estável entre execuções.
-      query: >-
-        SELECT trim(BOTH '"' FROM JSONExtractRaw(customerClient, 'id')) AS customer_id,
-          min(JSONExtractString(_partition, 'customer_id')) AS login_customer_id
-        FROM {{table:customer_client}}
-        WHERE customer_id != '' AND NOT JSONExtractBool(customerClient, 'manager')
-        GROUP BY customer_id
-        ORDER BY customer_id
-
-  - name: campaign
+    partitions:
+      # Só conta de cliente ativa: conta de gerente não tem métrica. O cliente que aparece sob
+      # mais de um gerente é lido uma vez, pelo de menor id.
+      query: 'SELECT JSONExtractString(customerClient, ''id'') AS customer_id, min(JSONExtractString(_partition, ''login_customer_id'')) AS login_customer_id FROM {{table:customer_clients}} WHERE NOT JSONExtractBool(customerClient, ''manager'') AND JSONExtractString(customerClient, ''status'') = ''ENABLED'' GROUP BY customer_id'
+  # Desempenho por campanha e dia.
+  - name: campaigns_daily
     syncMode: full_refresh
-    partitions: *per_client
-
-  - name: ad_group
+    partitions:
+      # Só conta de cliente ativa: conta de gerente não tem métrica. O cliente que aparece sob
+      # mais de um gerente é lido uma vez, pelo de menor id.
+      query: 'SELECT JSONExtractString(customerClient, ''id'') AS customer_id, min(JSONExtractString(_partition, ''login_customer_id'')) AS login_customer_id FROM {{table:customer_clients}} WHERE NOT JSONExtractBool(customerClient, ''manager'') AND JSONExtractString(customerClient, ''status'') = ''ENABLED'' GROUP BY customer_id'
+  # Desempenho por grupo de anúncios e dia.
+  - name: ad_groups_daily
     syncMode: full_refresh
-    partitions: *per_client
-
-  - name: ad_group_ad
+    partitions:
+      # Só conta de cliente ativa: conta de gerente não tem métrica. O cliente que aparece sob
+      # mais de um gerente é lido uma vez, pelo de menor id.
+      query: 'SELECT JSONExtractString(customerClient, ''id'') AS customer_id, min(JSONExtractString(_partition, ''login_customer_id'')) AS login_customer_id FROM {{table:customer_clients}} WHERE NOT JSONExtractBool(customerClient, ''manager'') AND JSONExtractString(customerClient, ''status'') = ''ENABLED'' GROUP BY customer_id'
+  # Desempenho por palavra-chave e dia.
+  - name: keywords_daily
     syncMode: full_refresh
-    partitions: *per_client
-
-  - name: account_performance_report
-    syncMode: full_refresh
-    partitions: *per_client
+    partitions:
+      # Só conta de cliente ativa: conta de gerente não tem métrica. O cliente que aparece sob
+      # mais de um gerente é lido uma vez, pelo de menor id.
+      query: 'SELECT JSONExtractString(customerClient, ''id'') AS customer_id, min(JSONExtractString(_partition, ''login_customer_id'')) AS login_customer_id FROM {{table:customer_clients}} WHERE NOT JSONExtractBool(customerClient, ''manager'') AND JSONExtractString(customerClient, ''status'') = ''ENABLED'' GROUP BY customer_id'
