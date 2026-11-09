@@ -1,0 +1,133 @@
+# yaml-language-server: $schema=../schema/connector.schema.json
+#
+# Escrito a partir da documentação pública do Google, não de outro conector:
+#   consulta: https://developers.google.com/google-ads/api/rest/common/search
+#   campos:   https://developers.google.com/google-ads/api/fields/v26/campaign (e customer_client,
+#             ad_group_criterion, keyword_view)
+#   versões:  https://developers.google.com/google-ads/api/docs/release-notes
+# Conferido em 08/11/2026, na v26 (lançada em 14/10/2026). Cada versão do Google Ads vive cerca
+# de um ano: trocar a versão é uma tag nova deste repositório, e a receita pede nova aprovação.
+# Termos de busca e região ficaram de fora: os campos não foram confirmados na v26.
+id: google-ads
+title: Google Ads
+publisher: Google
+kind: http-declarative
+manifest:
+  version: 1
+  requester:
+    urlTemplate: https://googleads.googleapis.com/v26/customers/{{customer_id}}/googleAds:search
+    method: POST
+    headers:
+      content-type: application/json
+  auth:
+    type: oauth2
+    tokenUrl: https://oauth2.googleapis.com/token
+    clientIdRef: client_id
+    clientSecretRef: client_secret
+    refreshTokenRef: refresh_token
+    # O Google pede o developer-token da organização em toda requisição, além do token de acesso.
+    secretHeaders:
+      developer-token: developer_token
+  # `search`, e não `searchStream`: o stream devolve uma lista de lotes, e o seletor de registros
+  # anda por objeto. O `search` devolve `results` e `nextPageToken`, que volta no corpo.
+  paginator:
+    type: cursor
+    param: pageToken
+    cursorPath: [nextPageToken]
+  rateLimit:
+    requestsPerMinute: 60
+  streams:
+    # As contas que a credencial alcança diretamente: `customers/123`, uma por registro.
+    - name: accessible_customers
+      request:
+        urlTemplate: https://googleads.googleapis.com/v26/customers:listAccessibleCustomers
+        method: GET
+      paginator:
+        type: none
+      recordSelector: [resourceNames]
+      missingIsEmpty: true
+
+    # A hierarquia abaixo de cada conta alcançada: uma conta de gerente lista os clientes dela.
+    - name: customer_clients
+      request:
+        urlTemplate: https://googleads.googleapis.com/v26/customers/{{login_customer_id}}/googleAds:search
+        body: '{"query":"SELECT customer_client.id, customer_client.descriptive_name, customer_client.manager, customer_client.level, customer_client.status, customer_client.currency_code, customer_client.time_zone, customer_client.client_customer FROM customer_client","pageToken":"{{cursor}}"}'
+        headers:
+          login-customer-id: '{{login_customer_id}}'
+      recordSelector: [results]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: campaigns
+      request:
+        body: '{"query":"SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, campaign.bidding_strategy_type, campaign.campaign_budget, campaign.start_date_time, campaign.end_date_time FROM campaign","pageToken":"{{cursor}}"}'
+        headers:
+          login-customer-id: '{{login_customer_id}}'
+      recordSelector: [results]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: campaigns_daily
+      request:
+        body: '{"query":"SELECT segments.date, campaign.id, campaign.name, metrics.impressions, metrics.clicks, metrics.interactions, metrics.cost_micros, metrics.conversions, metrics.conversions_value FROM campaign WHERE segments.date DURING LAST_30_DAYS","pageToken":"{{cursor}}"}'
+        headers:
+          login-customer-id: '{{login_customer_id}}'
+      recordSelector: [results]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: ad_groups_daily
+      request:
+        body: '{"query":"SELECT segments.date, campaign.id, ad_group.id, ad_group.name, ad_group.status, metrics.impressions, metrics.clicks, metrics.interactions, metrics.cost_micros, metrics.conversions, metrics.conversions_value FROM ad_group WHERE segments.date DURING LAST_30_DAYS","pageToken":"{{cursor}}"}'
+        headers:
+          login-customer-id: '{{login_customer_id}}'
+      recordSelector: [results]
+      missingIsEmpty: true
+      partitionField: _partition
+
+    - name: keywords_daily
+      request:
+        body: '{"query":"SELECT segments.date, campaign.id, ad_group.id, ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, metrics.impressions, metrics.clicks, metrics.interactions, metrics.cost_micros, metrics.conversions, metrics.conversions_value FROM keyword_view WHERE segments.date DURING LAST_30_DAYS","pageToken":"{{cursor}}"}'
+        headers:
+          login-customer-id: '{{login_customer_id}}'
+      recordSelector: [results]
+      missingIsEmpty: true
+      partitionField: _partition
+
+# Os valores em dinheiro vêm em micros (cost_micros / 1e6) e na moeda da conta, que está em
+# customer_clients. Converter e dar nome é o SELECT do CLEAR, sobre o RAW.
+streams:
+  - name: accessible_customers
+    syncMode: full_refresh
+  - name: customer_clients
+    syncMode: full_refresh
+    partitions:
+      query: 'SELECT DISTINCT replaceOne(value, ''customers/'', '''') AS login_customer_id FROM {{table:accessible_customers}} WHERE value LIKE ''customers/%'''
+  # Campanhas: nome, situação, canal, lance e orçamento.
+  - name: campaigns
+    syncMode: full_refresh
+    partitions:
+      # Só conta de cliente ativa: conta de gerente não tem métrica. O cliente que aparece sob
+      # mais de um gerente é lido uma vez, pelo de menor id.
+      query: 'SELECT JSONExtractString(customerClient, ''id'') AS customer_id, min(JSONExtractString(_partition, ''login_customer_id'')) AS login_customer_id FROM {{table:customer_clients}} WHERE NOT JSONExtractBool(customerClient, ''manager'') AND JSONExtractString(customerClient, ''status'') = ''ENABLED'' GROUP BY customer_id'
+  # Desempenho por campanha e dia.
+  - name: campaigns_daily
+    syncMode: full_refresh
+    partitions:
+      # Só conta de cliente ativa: conta de gerente não tem métrica. O cliente que aparece sob
+      # mais de um gerente é lido uma vez, pelo de menor id.
+      query: 'SELECT JSONExtractString(customerClient, ''id'') AS customer_id, min(JSONExtractString(_partition, ''login_customer_id'')) AS login_customer_id FROM {{table:customer_clients}} WHERE NOT JSONExtractBool(customerClient, ''manager'') AND JSONExtractString(customerClient, ''status'') = ''ENABLED'' GROUP BY customer_id'
+  # Desempenho por grupo de anúncios e dia.
+  - name: ad_groups_daily
+    syncMode: full_refresh
+    partitions:
+      # Só conta de cliente ativa: conta de gerente não tem métrica. O cliente que aparece sob
+      # mais de um gerente é lido uma vez, pelo de menor id.
+      query: 'SELECT JSONExtractString(customerClient, ''id'') AS customer_id, min(JSONExtractString(_partition, ''login_customer_id'')) AS login_customer_id FROM {{table:customer_clients}} WHERE NOT JSONExtractBool(customerClient, ''manager'') AND JSONExtractString(customerClient, ''status'') = ''ENABLED'' GROUP BY customer_id'
+  # Desempenho por palavra-chave e dia.
+  - name: keywords_daily
+    syncMode: full_refresh
+    partitions:
+      # Só conta de cliente ativa: conta de gerente não tem métrica. O cliente que aparece sob
+      # mais de um gerente é lido uma vez, pelo de menor id.
+      query: 'SELECT JSONExtractString(customerClient, ''id'') AS customer_id, min(JSONExtractString(_partition, ''login_customer_id'')) AS login_customer_id FROM {{table:customer_clients}} WHERE NOT JSONExtractBool(customerClient, ''manager'') AND JSONExtractString(customerClient, ''status'') = ''ENABLED'' GROUP BY customer_id'
