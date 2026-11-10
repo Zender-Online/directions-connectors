@@ -1141,6 +1141,26 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 20000
+              },
+              "since": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 5000
+                  },
+                  "fallback": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 5000
+                  }
+                },
+                "required": [
+                  "query",
+                  "fallback"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
