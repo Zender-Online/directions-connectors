@@ -1175,6 +1175,20 @@
         ],
         "additionalProperties": false
       }
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "maxDurationMs": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 21600000
+        }
+      },
+      "required": [
+        "maxDurationMs"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
