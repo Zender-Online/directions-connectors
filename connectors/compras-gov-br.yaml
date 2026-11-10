@@ -193,6 +193,10 @@ manifest:
         urlTemplate: https://dadosabertos.compras.gov.br/modulo-servico/8_consultarNaturezaDespesaServico
       recordSelector: [resultado]
       missingIsEmpty: true
+# Duas horas por execução: os itens de material levam uns 15 minutos e as características
+# (3.479 páginas) uma hora, sem partição possível, porque o endpoint só filtra por item.
+limits:
+  maxDurationMs: 7200000
 # Tabelas de referência: carga completa a cada execução, sem partição.
 streams:
   - name: material_grupos
