@@ -16,7 +16,7 @@ kind: http-declarative
 manifest:
   version: 1
   requester:
-    urlTemplate: https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao
+    urlTemplate: https://pncp.gov.br/api/consulta/v1/contratacoes/atualizacao
     params:
       pagina: '{{page}}'
       tamanhoPagina: '{{size}}'
@@ -28,9 +28,11 @@ manifest:
     sizeParam: tamanhoPagina
     size: 50
     totalPagesPath: [totalPaginas]
-  # Não há cota oficial; o integrador anterior pausava 1,5 s entre páginas.
+  # Não há cota publicada nem cabeçalho de limite: o PNCP só responde 429. Medido em 10/11/2026,
+  # um pedido por vez: a 40 por minuto o 429 era constante; a 30 e a 20, nenhum em 100 pedidos.
+  # 25 deixa folga, e o runner ainda desacelera sozinho se vier um 429.
   rateLimit:
-    requestsPerMinute: 40
+    requestsPerMinute: 25
   # 5xx, 429 e a página do WAF repetem a MESMA página. Esgotadas as tentativas, a partição falha
   # e a próxima execução retoma dela: nunca um buraco silencioso.
   retry:
@@ -41,7 +43,8 @@ manifest:
   limits:
     requestTimeoutMs: 90000
   streams:
-    # Contratações publicadas na semana, por modalidade (a API exige a modalidade).
+    # Contratações ATUALIZADAS na semana, por modalidade (a API exige a modalidade). O filtro é
+    # pela `dataAtualizacaoGlobal`: uma compra alterada depois de publicada volta a ser lida.
     - name: contratacoes
       params:
         dataInicial: '{{data_inicial}}'
@@ -50,10 +53,10 @@ manifest:
       recordSelector: [data]
       missingIsEmpty: true
 
-    # Contratos publicados na semana.
+    # Contratos atualizados na semana.
     - name: contratos
       request:
-        urlTemplate: https://pncp.gov.br/api/consulta/v1/contratos
+        urlTemplate: https://pncp.gov.br/api/consulta/v1/contratos/atualizacao
       paginator:
         type: page
         param: pagina
@@ -66,10 +69,10 @@ manifest:
       recordSelector: [data]
       missingIsEmpty: true
 
-    # Atas de registro de preço da semana.
+    # Atas de registro de preço atualizadas na semana.
     - name: atas
       request:
-        urlTemplate: https://pncp.gov.br/api/consulta/v1/atas
+        urlTemplate: https://pncp.gov.br/api/consulta/v1/atas/atualizacao
       paginator:
         type: page
         param: pagina
@@ -104,30 +107,42 @@ manifest:
       recordSelector: []
       partitionField: _partition
 streams:
-  # Duas janelas de semana: os últimos dois anos, segunda a domingo. A data final não depende de
-  # hoje, então a lista só muda quando começa uma semana nova.
+  # Incremental pela data de atualização. Na primeira carga, `since` é hoje menos dois anos; depois,
+  # a última `dataAtualizacaoGlobal` já publicada. As janelas começam uma semana antes dela (folga
+  # para atualização atrasada) e vão até a semana de hoje: depois da carga inicial, umas três
+  # semanas por execução. A chave mantém só a versão mais recente de cada registro.
   - name: contratacoes
-    syncMode: full_refresh
+    syncMode: incremental
     primaryKey: [[numeroControlePNCP]]
     partitions:
-      query: "SELECT formatDateTime(d, '%Y%m%d') AS data_inicial, formatDateTime(d + 6, '%Y%m%d') AS data_final, toString(m) AS modalidade FROM (SELECT toMonday(today() - toIntervalYear(2)) + toIntervalWeek(n) AS d FROM system.one ARRAY JOIN range(0, 110) AS n) ARRAY JOIN range(1, 14) AS m WHERE d <= today()"
+      query: "SELECT formatDateTime(d, '%Y%m%d') AS data_inicial, formatDateTime(d + 6, '%Y%m%d') AS data_final, toString(m) AS modalidade FROM (SELECT toMonday(toDate('{{since}}') - 7) + toIntervalWeek(n) AS d FROM system.one ARRAY JOIN range(0, toUInt32(dateDiff('week', toMonday(toDate('{{since}}') - 7), today()) + 1)) AS n) ARRAY JOIN range(1, 14) AS m"
+      since:
+        query: "SELECT toString(toDate(max(parseDateTimeBestEffortOrNull(toString(dataAtualizacaoGlobal))))) FROM {{table:contratacoes}}"
+        fallback: "SELECT toString(today() - toIntervalYear(2))"
   - name: contratos
-    syncMode: full_refresh
+    syncMode: incremental
     primaryKey: [[numeroControlePNCP]]
     partitions:
-      query: "SELECT formatDateTime(d, '%Y%m%d') AS data_inicial, formatDateTime(d + 6, '%Y%m%d') AS data_final FROM (SELECT toMonday(today() - toIntervalYear(2)) + toIntervalWeek(n) AS d FROM system.one ARRAY JOIN range(0, 110) AS n) WHERE d <= today()"
+      query: "SELECT formatDateTime(d, '%Y%m%d') AS data_inicial, formatDateTime(d + 6, '%Y%m%d') AS data_final FROM (SELECT toMonday(toDate('{{since}}') - 7) + toIntervalWeek(n) AS d FROM system.one ARRAY JOIN range(0, toUInt32(dateDiff('week', toMonday(toDate('{{since}}') - 7), today()) + 1)) AS n)"
+      since:
+        query: "SELECT toString(toDate(max(parseDateTimeBestEffortOrNull(toString(dataAtualizacaoGlobal))))) FROM {{table:contratos}}"
+        fallback: "SELECT toString(today() - toIntervalYear(2))"
   - name: atas
-    syncMode: full_refresh
+    syncMode: incremental
     primaryKey: [[numeroControlePNCPAta]]
     partitions:
-      query: "SELECT formatDateTime(d, '%Y%m%d') AS data_inicial, formatDateTime(d + 6, '%Y%m%d') AS data_final FROM (SELECT toMonday(today() - toIntervalYear(2)) + toIntervalWeek(n) AS d FROM system.one ARRAY JOIN range(0, 110) AS n) WHERE d <= today()"
+      query: "SELECT formatDateTime(d, '%Y%m%d') AS data_inicial, formatDateTime(d + 6, '%Y%m%d') AS data_final FROM (SELECT toMonday(toDate('{{since}}') - 7) + toIntervalWeek(n) AS d FROM system.one ARRAY JOIN range(0, toUInt32(dateDiff('week', toMonday(toDate('{{since}}') - 7), today()) + 1)) AS n)"
+      since:
+        query: "SELECT toString(toDate(max(parseDateTimeBestEffortOrNull(toString(dataAtualizacaoGlobal))))) FROM {{table:atas}}"
+        fallback: "SELECT toString(today() - toIntervalYear(2))"
+  # O retrato de hoje: carga completa a cada execução.
   - name: editais_abertos
     syncMode: full_refresh
     primaryKey: [[numeroControlePNCP]]
     partitions:
       query: "SELECT formatDateTime(today() + 60, '%Y%m%d') AS data_final, toString(m) AS modalidade FROM system.one ARRAY JOIN range(1, 14) AS m"
-  # Filho das contratações publicadas: só o último ano, para caber no teto de 120 mil chaves.
+  # Filho das contratações: as compras atualizadas no último ano, para caber no teto de 120 mil.
   - name: itens
     syncMode: full_refresh
     partitions:
-      query: "SELECT DISTINCT JSONExtractString(orgaoEntidade, 'cnpj') AS cnpj, toString(anoCompra) AS ano, toString(sequencialCompra) AS sequencial FROM {{table:contratacoes}} WHERE parseDateTimeBestEffortOrNull(toString(dataPublicacaoPncp)) >= today() - 365 AND JSONExtractString(orgaoEntidade, 'cnpj') != ''"
+      query: "SELECT DISTINCT JSONExtractString(orgaoEntidade, 'cnpj') AS cnpj, toString(anoCompra) AS ano, toString(sequencialCompra) AS sequencial FROM {{table:contratacoes}} WHERE parseDateTimeBestEffortOrNull(toString(dataAtualizacaoGlobal)) >= today() - 365 AND JSONExtractString(orgaoEntidade, 'cnpj') != ''"
