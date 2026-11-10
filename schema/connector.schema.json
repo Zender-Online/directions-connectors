@@ -327,6 +327,14 @@
                       "type": "null"
                     }
                   ]
+                },
+                "totalPagesPath": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
                 }
               },
               "required": [
@@ -521,6 +529,52 @@
           },
           "additionalProperties": false
         },
+        "retry": {
+          "type": "object",
+          "properties": {
+            "attempts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
+            },
+            "baseDelayMs": {
+              "default": 5000,
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 120000
+            },
+            "maxDelayMs": {
+              "default": 120000,
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 600000
+            },
+            "statuses": {
+              "default": [
+                429,
+                500,
+                502,
+                503,
+                504
+              ],
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 400,
+                "maximum": 599
+              }
+            },
+            "blockedHtml": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "attempts"
+          ],
+          "additionalProperties": false
+        },
         "streams": {
           "minItems": 1,
           "maxItems": 300,
@@ -653,6 +707,14 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "totalPagesPath": {
+                            "minItems": 1,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
                           }
                         },
                         "required": [
@@ -845,6 +907,10 @@
                 "type": "boolean"
               },
               "missingIsEmpty": {
+                "default": false,
+                "type": "boolean"
+              },
+              "labelsRecord": {
                 "default": false,
                 "type": "boolean"
               },
