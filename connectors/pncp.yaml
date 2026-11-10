@@ -1,0 +1,133 @@
+# yaml-language-server: $schema=../schema/connector.schema.json
+#
+# Portal Nacional de Contratações Públicas, escrito a partir do OpenAPI público:
+#   consulta:    https://pncp.gov.br/api/consulta/v3/api-docs  (listas por período)
+#   manutenção:  https://pncp.gov.br/api/pncp/v3/api-docs      (itens de uma compra)
+# Conferido em 09/11/2026. Sem autenticação. Comportamentos medidos naquele dia:
+#   - janela sem dado responde 204 sem corpo (o runner lê como página vazia);
+#   - o corpo traz `totalPaginas`, que encerra a leitura sem pedir uma página a mais;
+#   - `/contratacoes/publicacao` recusa `tamanhoPagina` acima de 50 (HTTP 400);
+#     `/contratos` e `/atas` aceitaram 500 no integrador anterior;
+#   - na frente da API há um WAF que às vezes devolve uma página HTML com status 200.
+id: pncp
+title: PNCP — Contratações Públicas
+publisher: Governo Federal (Ministério da Gestão)
+kind: http-declarative
+manifest:
+  version: 1
+  requester:
+    urlTemplate: https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao
+    params:
+      pagina: '{{page}}'
+      tamanhoPagina: '{{size}}'
+  auth:
+    type: none
+  paginator:
+    type: page
+    param: pagina
+    sizeParam: tamanhoPagina
+    size: 50
+    totalPagesPath: [totalPaginas]
+  # Não há cota oficial; o integrador anterior pausava 1,5 s entre páginas.
+  rateLimit:
+    requestsPerMinute: 40
+  # 5xx, 429 e a página do WAF repetem a MESMA página. Esgotadas as tentativas, a partição falha
+  # e a próxima execução retoma dela: nunca um buraco silencioso.
+  retry:
+    attempts: 5
+    baseDelayMs: 5000
+    maxDelayMs: 120000
+    blockedHtml: true
+  limits:
+    requestTimeoutMs: 90000
+  streams:
+    # Contratações publicadas na semana, por modalidade (a API exige a modalidade).
+    - name: contratacoes
+      params:
+        dataInicial: '{{data_inicial}}'
+        dataFinal: '{{data_final}}'
+        codigoModalidadeContratacao: '{{modalidade}}'
+      recordSelector: [data]
+      missingIsEmpty: true
+
+    # Contratos publicados na semana.
+    - name: contratos
+      request:
+        urlTemplate: https://pncp.gov.br/api/consulta/v1/contratos
+      paginator:
+        type: page
+        param: pagina
+        sizeParam: tamanhoPagina
+        size: 500
+        totalPagesPath: [totalPaginas]
+      params:
+        dataInicial: '{{data_inicial}}'
+        dataFinal: '{{data_final}}'
+      recordSelector: [data]
+      missingIsEmpty: true
+
+    # Atas de registro de preço da semana.
+    - name: atas
+      request:
+        urlTemplate: https://pncp.gov.br/api/consulta/v1/atas
+      paginator:
+        type: page
+        param: pagina
+        sizeParam: tamanhoPagina
+        size: 500
+        totalPagesPath: [totalPaginas]
+      params:
+        dataInicial: '{{data_inicial}}'
+        dataFinal: '{{data_final}}'
+      recordSelector: [data]
+      missingIsEmpty: true
+
+    # Editais com proposta aberta até a data final, por modalidade: o retrato de hoje.
+    - name: editais_abertos
+      request:
+        urlTemplate: https://pncp.gov.br/api/consulta/v1/contratacoes/proposta
+      params:
+        dataFinal: '{{data_final}}'
+        codigoModalidadeContratacao: '{{modalidade}}'
+      recordSelector: [data]
+      missingIsEmpty: true
+
+    # Itens de cada compra. A API devolve a lista solta, sem envelope: termina na página vazia.
+    - name: itens
+      request:
+        urlTemplate: https://pncp.gov.br/api/pncp/v1/orgaos/{{cnpj}}/compras/{{ano}}/{{sequencial}}/itens
+      paginator:
+        type: page
+        param: pagina
+        sizeParam: tamanhoPagina
+        size: 50
+      recordSelector: []
+      partitionField: _partition
+streams:
+  # Duas janelas de semana: os últimos dois anos, segunda a domingo. A data final não depende de
+  # hoje, então a lista só muda quando começa uma semana nova.
+  - name: contratacoes
+    syncMode: full_refresh
+    primaryKey: [[numeroControlePNCP]]
+    partitions:
+      query: "SELECT formatDateTime(d, '%Y%m%d') AS data_inicial, formatDateTime(d + 6, '%Y%m%d') AS data_final, toString(m) AS modalidade FROM (SELECT toMonday(today() - toIntervalYear(2)) + toIntervalWeek(n) AS d FROM system.one ARRAY JOIN range(0, 110) AS n) ARRAY JOIN range(1, 14) AS m WHERE d <= today()"
+  - name: contratos
+    syncMode: full_refresh
+    primaryKey: [[numeroControlePNCP]]
+    partitions:
+      query: "SELECT formatDateTime(d, '%Y%m%d') AS data_inicial, formatDateTime(d + 6, '%Y%m%d') AS data_final FROM (SELECT toMonday(today() - toIntervalYear(2)) + toIntervalWeek(n) AS d FROM system.one ARRAY JOIN range(0, 110) AS n) WHERE d <= today()"
+  - name: atas
+    syncMode: full_refresh
+    primaryKey: [[numeroControlePNCPAta]]
+    partitions:
+      query: "SELECT formatDateTime(d, '%Y%m%d') AS data_inicial, formatDateTime(d + 6, '%Y%m%d') AS data_final FROM (SELECT toMonday(today() - toIntervalYear(2)) + toIntervalWeek(n) AS d FROM system.one ARRAY JOIN range(0, 110) AS n) WHERE d <= today()"
+  - name: editais_abertos
+    syncMode: full_refresh
+    primaryKey: [[numeroControlePNCP]]
+    partitions:
+      query: "SELECT formatDateTime(today() + 60, '%Y%m%d') AS data_final, toString(m) AS modalidade FROM system.one ARRAY JOIN range(1, 14) AS m"
+  # Filho das contratações publicadas: só o último ano, para caber no teto de 120 mil chaves.
+  - name: itens
+    syncMode: full_refresh
+    partitions:
+      query: "SELECT DISTINCT JSONExtractString(orgaoEntidade, 'cnpj') AS cnpj, toString(anoCompra) AS ano, toString(sequencialCompra) AS sequencial FROM {{table:contratacoes}} WHERE parseDateTimeBestEffortOrNull(toString(dataPublicacaoPncp)) >= today() - 365 AND JSONExtractString(orgaoEntidade, 'cnpj') != ''"
