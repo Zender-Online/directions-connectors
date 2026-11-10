@@ -1177,11 +1177,59 @@
                   "fallback"
                 ],
                 "additionalProperties": false
+              },
+              "cursor": {
+                "type": "object",
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+                  },
+                  "window": {
+                    "type": "string",
+                    "enum": [
+                      "day",
+                      "week"
+                    ]
+                  },
+                  "lookbackDays": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 366
+                  },
+                  "firstLoadDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3660
+                  },
+                  "format": {
+                    "type": "string",
+                    "enum": [
+                      "yyyyMMdd",
+                      "yyyy-MM-dd"
+                    ]
+                  },
+                  "from": {
+                    "type": "string",
+                    "pattern": "^[a-z_][a-z0-9_]{0,59}$"
+                  },
+                  "to": {
+                    "type": "string",
+                    "pattern": "^[a-z_][a-z0-9_]{0,59}$"
+                  }
+                },
+                "required": [
+                  "field",
+                  "window",
+                  "lookbackDays",
+                  "firstLoadDays",
+                  "format",
+                  "from",
+                  "to"
+                ],
+                "additionalProperties": false
               }
             },
-            "required": [
-              "query"
-            ],
             "additionalProperties": false
           }
         },

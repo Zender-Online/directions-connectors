@@ -110,37 +110,52 @@ manifest:
       recordSelector: []
       partitionField: _partition
 streams:
-  # Incremental pela data de atualização. Na primeira carga, `since` é hoje menos dois anos; depois,
-  # a última `dataAtualizacaoGlobal` já publicada. As janelas começam uma semana antes dela (folga
-  # para atualização atrasada) e vão até a semana de hoje: depois da carga inicial, umas três
-  # semanas por execução. A chave mantém só a versão mais recente de cada registro.
+  # Atualização constante, pelo `cursor`: a engine lê a última `dataAtualizacaoGlobal` já
+  # publicada, volta 7 dias (folga para atualização atrasada) e lista as janelas até hoje, da mais
+  # velha para a mais nova; na primeira carga, os últimos dois anos. Cada janela é um checkpoint, e
+  # se a API cair de vez as janelas completas são publicadas: a próxima execução segue da última
+  # data. A chave mantém só a versão mais recente de cada registro.
   # Contratos e atas vão por DIA: uma semana de contratos passa de 33 mil registros e não fecha
   # nos 15 min de uma fatia (medido em 10/11/2026: ~25 s por página de 500). Sem partição
   # concluída não há checkpoint e a execução falha; um dia (9.667 em 04/11/2025) cabe com folga.
+  # As contratações vão por semana, e cada semana pelas 13 modalidades (a API exige uma).
   - name: contratacoes
     syncMode: incremental
     primaryKey: [[numeroControlePNCP]]
     partitions:
-      query: "SELECT formatDateTime(d, '%Y%m%d') AS data_inicial, formatDateTime(d + 6, '%Y%m%d') AS data_final, toString(m) AS modalidade FROM (SELECT toMonday(toDate('{{since}}') - 7) + toIntervalWeek(n) AS d FROM system.one ARRAY JOIN range(0, toUInt32(dateDiff('week', toMonday(toDate('{{since}}') - 7), today()) + 1)) AS n) ARRAY JOIN range(1, 14) AS m"
-      since:
-        query: "SELECT toString(toDate(max(parseDateTimeBestEffortOrNull(toString(dataAtualizacaoGlobal))))) FROM {{table:contratacoes}}"
-        fallback: "SELECT toString(today() - toIntervalYear(2))"
+      query: "SELECT toString(m) AS modalidade FROM system.one ARRAY JOIN range(1, 14) AS m"
+      cursor:
+        field: dataAtualizacaoGlobal
+        window: week
+        lookbackDays: 7
+        firstLoadDays: 730
+        format: yyyyMMdd
+        from: data_inicial
+        to: data_final
   - name: contratos
     syncMode: incremental
     primaryKey: [[numeroControlePNCP]]
     partitions:
-      query: "SELECT formatDateTime(d, '%Y%m%d') AS data_inicial, formatDateTime(d, '%Y%m%d') AS data_final FROM (SELECT toDate('{{since}}') - 7 + n AS d FROM system.one ARRAY JOIN range(0, toUInt32(dateDiff('day', toDate('{{since}}') - 7, today()) + 1)) AS n)"
-      since:
-        query: "SELECT toString(toDate(max(parseDateTimeBestEffortOrNull(toString(dataAtualizacaoGlobal))))) FROM {{table:contratos}}"
-        fallback: "SELECT toString(today() - toIntervalYear(2))"
+      cursor:
+        field: dataAtualizacaoGlobal
+        window: day
+        lookbackDays: 7
+        firstLoadDays: 730
+        format: yyyyMMdd
+        from: data_inicial
+        to: data_final
   - name: atas
     syncMode: incremental
     primaryKey: [[numeroControlePNCPAta]]
     partitions:
-      query: "SELECT formatDateTime(d, '%Y%m%d') AS data_inicial, formatDateTime(d, '%Y%m%d') AS data_final FROM (SELECT toDate('{{since}}') - 7 + n AS d FROM system.one ARRAY JOIN range(0, toUInt32(dateDiff('day', toDate('{{since}}') - 7, today()) + 1)) AS n)"
-      since:
-        query: "SELECT toString(toDate(max(parseDateTimeBestEffortOrNull(toString(dataAtualizacaoGlobal))))) FROM {{table:atas}}"
-        fallback: "SELECT toString(today() - toIntervalYear(2))"
+      cursor:
+        field: dataAtualizacaoGlobal
+        window: day
+        lookbackDays: 7
+        firstLoadDays: 730
+        format: yyyyMMdd
+        from: data_inicial
+        to: data_final
   # O retrato de hoje: carga completa a cada execução.
   - name: editais_abertos
     syncMode: full_refresh
