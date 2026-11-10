@@ -27,8 +27,10 @@ manifest:
     totalPagesPath: [totalPaginas]
     totalRecordsPath: [totalRegistros]
   # Sem cota publicada; folga para não pesar num serviço público.
+  # 120 por minuto: as características são 346 mil consultas de menos de meio segundo, e a 60
+  # levariam quatro dias. Uma página funda pesa mais no servidor que centenas delas.
   rateLimit:
-    requestsPerMinute: 60
+    requestsPerMinute: 120
   # 5xx, 429, página HTML e 400 repetem a mesma página; esgotadas as tentativas, a leitura falha.
   # O 400 entra porque é transitório aqui: em 10/11/2026 a página 523 dos itens de material
   # respondeu 400 no meio da leitura e 200 logo depois, com os mesmos parâmetros.
@@ -120,7 +122,11 @@ manifest:
       recordSelector: [resultado]
       missingIsEmpty: true
 
-    # Características de cada item (1,74 milhão, 3.479 páginas): o stream mais longo, cerca de uma hora.
+    # Características de cada item (1,74 milhão). Lidas POR ITEM, uma consulta por código de
+    # `material_itens`: a paginação não chega ao fim. Medido em 10/11/2026, a página 1 leva 20 s,
+    # a 2.000 leva 205 s, e da 2.500 em diante o gateway corta em 240 s com 504; o custo cresce
+    # com a profundidade, não com o tamanho da página. Por item, 0,2 a 0,5 s, e um código sem
+    # característica responde 200 com a lista vazia.
     - name: material_caracteristicas
       request:
         urlTemplate: https://dadosabertos.compras.gov.br/modulo-material/7_consultarMaterialCaracteristicas
@@ -133,6 +139,7 @@ manifest:
         totalRecordsPath: [totalRegistros]
       params:
         tamanhoPagina: '{{size}}'
+        codigoItem: '{{codigo_item}}'
       recordSelector: [resultado]
       missingIsEmpty: true
 
@@ -200,11 +207,11 @@ manifest:
         urlTemplate: https://dadosabertos.compras.gov.br/modulo-servico/8_consultarNaturezaDespesaServico
       recordSelector: [resultado]
       missingIsEmpty: true
-# Duas horas por execução: os itens de material levam uns 15 minutos e as características
-# (3.479 páginas) uma hora, sem partição possível, porque o endpoint só filtra por item.
+# Duas horas por fatia: os itens de material levam uns 15 minutos. As características passam
+# disso de longe (346 mil consultas, uns dois dias) e seguem em fatias, retomando do último item lido.
 limits:
   maxDurationMs: 7200000
-# Tabelas de referência: carga completa a cada execução, sem partição.
+# Tabelas de referência: carga completa a cada execução. Só as características são partidas.
 streams:
   - name: material_grupos
     syncMode: full_refresh
@@ -224,6 +231,10 @@ streams:
     syncMode: full_refresh
   - name: material_caracteristicas
     syncMode: full_refresh
+    primaryKey: [[codigoItem], [numeroCaracteristica]]
+    # Depende de `material_itens` publicada: é a lista de códigos.
+    partitions:
+      query: "SELECT toString(codigoItem) AS codigo_item FROM {{table:material_itens}}"
   - name: servico_secoes
     syncMode: full_refresh
     primaryKey: [[codigoSecao]]
