@@ -335,6 +335,14 @@
                     "type": "string",
                     "minLength": 1
                   }
+                },
+                "totalRecordsPath": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
                 }
               },
               "required": [
@@ -709,6 +717,14 @@
                             ]
                           },
                           "totalPagesPath": {
+                            "minItems": 1,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "totalRecordsPath": {
                             "minItems": 1,
                             "type": "array",
                             "items": {

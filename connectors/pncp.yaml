@@ -28,6 +28,7 @@ manifest:
     sizeParam: tamanhoPagina
     size: 50
     totalPagesPath: [totalPaginas]
+    totalRecordsPath: [totalRegistros]
   # Não há cota publicada nem cabeçalho de limite: o PNCP só responde 429. Medido em 10/11/2026,
   # um pedido por vez: a 40 por minuto o 429 era constante; a 30 e a 20, nenhum em 100 pedidos.
   # 25 deixa folga, e o runner ainda desacelera sozinho se vier um 429.
@@ -63,6 +64,7 @@ manifest:
         sizeParam: tamanhoPagina
         size: 500
         totalPagesPath: [totalPaginas]
+        totalRecordsPath: [totalRegistros]
       params:
         dataInicial: '{{data_inicial}}'
         dataFinal: '{{data_final}}'
@@ -79,6 +81,7 @@ manifest:
         sizeParam: tamanhoPagina
         size: 500
         totalPagesPath: [totalPaginas]
+        totalRecordsPath: [totalRegistros]
       params:
         dataInicial: '{{data_inicial}}'
         dataFinal: '{{data_final}}'

@@ -25,6 +25,7 @@ manifest:
     type: page
     param: pagina
     totalPagesPath: [totalPaginas]
+    totalRecordsPath: [totalRegistros]
   # Sem cota publicada; folga para não pesar num serviço público.
   rateLimit:
     requestsPerMinute: 60
@@ -64,6 +65,7 @@ manifest:
         sizeParam: tamanhoPagina
         size: 500
         totalPagesPath: [totalPaginas]
+        totalRecordsPath: [totalRegistros]
       params:
         tamanhoPagina: '{{size}}'
       recordSelector: [resultado]
@@ -79,6 +81,7 @@ manifest:
         sizeParam: tamanhoPagina
         size: 500
         totalPagesPath: [totalPaginas]
+        totalRecordsPath: [totalRegistros]
       params:
         tamanhoPagina: '{{size}}'
       recordSelector: [resultado]
@@ -94,6 +97,7 @@ manifest:
         sizeParam: tamanhoPagina
         size: 500
         totalPagesPath: [totalPaginas]
+        totalRecordsPath: [totalRegistros]
       params:
         tamanhoPagina: '{{size}}'
       recordSelector: [resultado]
@@ -110,6 +114,7 @@ manifest:
         sizeParam: tamanhoPagina
         size: 500
         totalPagesPath: [totalPaginas]
+        totalRecordsPath: [totalRegistros]
       params:
         tamanhoPagina: '{{size}}'
       recordSelector: [resultado]
@@ -125,6 +130,7 @@ manifest:
         sizeParam: tamanhoPagina
         size: 500
         totalPagesPath: [totalPaginas]
+        totalRecordsPath: [totalRegistros]
       params:
         tamanhoPagina: '{{size}}'
       recordSelector: [resultado]
@@ -175,6 +181,7 @@ manifest:
         sizeParam: tamanhoPagina
         size: 500
         totalPagesPath: [totalPaginas]
+        totalRecordsPath: [totalRegistros]
       params:
         tamanhoPagina: '{{size}}'
       recordSelector: [resultado]
