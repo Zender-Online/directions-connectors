@@ -54,7 +54,7 @@ manifest:
       recordSelector: [data]
       missingIsEmpty: true
 
-    # Contratos atualizados na semana.
+    # Contratos atualizados no dia.
     - name: contratos
       request:
         urlTemplate: https://pncp.gov.br/api/consulta/v1/contratos/atualizacao
@@ -114,6 +114,9 @@ streams:
   # a última `dataAtualizacaoGlobal` já publicada. As janelas começam uma semana antes dela (folga
   # para atualização atrasada) e vão até a semana de hoje: depois da carga inicial, umas três
   # semanas por execução. A chave mantém só a versão mais recente de cada registro.
+  # Contratos e atas vão por DIA: uma semana de contratos passa de 33 mil registros e não fecha
+  # nos 15 min de uma fatia (medido em 10/11/2026: ~25 s por página de 500). Sem partição
+  # concluída não há checkpoint e a execução falha; um dia (9.667 em 04/11/2025) cabe com folga.
   - name: contratacoes
     syncMode: incremental
     primaryKey: [[numeroControlePNCP]]
@@ -126,7 +129,7 @@ streams:
     syncMode: incremental
     primaryKey: [[numeroControlePNCP]]
     partitions:
-      query: "SELECT formatDateTime(d, '%Y%m%d') AS data_inicial, formatDateTime(d + 6, '%Y%m%d') AS data_final FROM (SELECT toMonday(toDate('{{since}}') - 7) + toIntervalWeek(n) AS d FROM system.one ARRAY JOIN range(0, toUInt32(dateDiff('week', toMonday(toDate('{{since}}') - 7), today()) + 1)) AS n)"
+      query: "SELECT formatDateTime(d, '%Y%m%d') AS data_inicial, formatDateTime(d, '%Y%m%d') AS data_final FROM (SELECT toDate('{{since}}') - 7 + n AS d FROM system.one ARRAY JOIN range(0, toUInt32(dateDiff('day', toDate('{{since}}') - 7, today()) + 1)) AS n)"
       since:
         query: "SELECT toString(toDate(max(parseDateTimeBestEffortOrNull(toString(dataAtualizacaoGlobal))))) FROM {{table:contratos}}"
         fallback: "SELECT toString(today() - toIntervalYear(2))"
@@ -134,7 +137,7 @@ streams:
     syncMode: incremental
     primaryKey: [[numeroControlePNCPAta]]
     partitions:
-      query: "SELECT formatDateTime(d, '%Y%m%d') AS data_inicial, formatDateTime(d + 6, '%Y%m%d') AS data_final FROM (SELECT toMonday(toDate('{{since}}') - 7) + toIntervalWeek(n) AS d FROM system.one ARRAY JOIN range(0, toUInt32(dateDiff('week', toMonday(toDate('{{since}}') - 7), today()) + 1)) AS n)"
+      query: "SELECT formatDateTime(d, '%Y%m%d') AS data_inicial, formatDateTime(d, '%Y%m%d') AS data_final FROM (SELECT toDate('{{since}}') - 7 + n AS d FROM system.one ARRAY JOIN range(0, toUInt32(dateDiff('day', toDate('{{since}}') - 7, today()) + 1)) AS n)"
       since:
         query: "SELECT toString(toDate(max(parseDateTimeBestEffortOrNull(toString(dataAtualizacaoGlobal))))) FROM {{table:atas}}"
         fallback: "SELECT toString(today() - toIntervalYear(2))"
