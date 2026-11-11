@@ -79,18 +79,17 @@ pnpm --filter @directions/ingestion-sources schemas:connectors <caminho deste re
 A engine valida de novo com o mesmo schema, em Zod, quando carrega a tag. Algumas regras do
 manifesto HTTP só existem lá, porque o JSON Schema não consegue expressá-las.
 
-## Licença de conectores de terceiros
+## Licença
 
-Antes de trazer um conector da Airbyte, confira a licença no registro dela. A maioria é ELv2, que
-proíbe oferecer o software como serviço gerenciado a terceiros, e isso precisa de avaliação
-jurídica. Os conectores com licença MIT podem ser convertidos.
+AGPL-3.0 (`LICENSE`). Quem oferecer estes conectores como serviço a terceiros, modificados, publica
+as modificações.
 
-Em 04/11/2026 o responsável decidiu traduzir três conectores ELv2: Instagram, Google Ads e GA4.
-A cópia sem modificação está em `vendor/airbyte/`, com o `LICENSE`. Todo conector traduzido:
-
-- tem o campo `origin`, com projeto, conector, versão, commit, licença e o que foi modificado. É
-  um campo, e não um comentário, porque o pacote é JSON e é ele a cópia distribuída;
-- começa com um comentário que aponta para `vendor/airbyte/LICENSE`.
+Todo conector daqui é escrito a partir da documentação pública da API: o OpenAPI do PNCP e do
+Compras.gov.br, a documentação do GA4, do Google Ads e da Graph API do Instagram. Não se copia nem
+se traduz conector de outro projeto cuja licença não seja compatível com a AGPL. Em particular, a
+maioria dos conectores da Airbyte é ELv2, que proíbe oferecê-los como serviço gerenciado. Se um
+conector partir de outro projeto com licença compatível, o campo `origin` registra o projeto, a
+versão, a licença e o que foi modificado.
 
 ## Conectores (`connectors/`)
 
