@@ -29,8 +29,12 @@ manifest:
   # Sem cota publicada; folga para não pesar num serviço público.
   # 120 por minuto: as características são 346 mil consultas de menos de meio segundo, e a 60
   # levariam quatro dias. Uma página funda pesa mais no servidor que centenas delas.
+  # Uma leitura por vez neste endereço, somando runners e organizações. Medido em 11/11/2026:
+  # com quatro pedidos simultâneos o 429 era contínuo e a leitura caía para 15 a 60 itens por
+  # minuto; um pedido por vez, sem outra leitura ao lado, fazia uns 80.
   rateLimit:
     requestsPerMinute: 120
+    concurrentRuns: 1
   # 5xx, 429, página HTML e 400 repetem a mesma página; esgotadas as tentativas, a leitura falha.
   # O 400 entra porque é transitório aqui: em 10/11/2026 a página 523 dos itens de material
   # respondeu 400 no meio da leitura e 200 logo depois, com os mesmos parâmetros.

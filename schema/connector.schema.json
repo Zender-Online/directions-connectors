@@ -502,6 +502,11 @@
             "respectRetryAfter": {
               "default": true,
               "type": "boolean"
+            },
+            "concurrentRuns": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16
             }
           },
           "additionalProperties": false
@@ -533,6 +538,12 @@
               "type": "integer",
               "exclusiveMinimum": 0,
               "maximum": 100000
+            },
+            "partitionConcurrency": {
+              "default": 1,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16
             }
           },
           "additionalProperties": false

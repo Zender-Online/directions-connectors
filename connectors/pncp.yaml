@@ -32,8 +32,12 @@ manifest:
   # Não há cota publicada nem cabeçalho de limite: o PNCP só responde 429. Medido em 10/11/2026,
   # um pedido por vez: a 40 por minuto o 429 era constante; a 30 e a 20, nenhum em 100 pedidos.
   # 25 deixa folga, e o runner ainda desacelera sozinho se vier um 429.
+  # O limite é do endereço de onde se chama, não de cada leitura: duas leituras a 25 cada são 50
+  # por minuto saindo do mesmo IP. Por isso no máximo uma leitura do PNCP por vez, somando todos
+  # os runners e organizações; as outras esperam na fila e se alternam a cada fatia.
   rateLimit:
     requestsPerMinute: 25
+    concurrentRuns: 1
   # 5xx, 429 e a página do WAF repetem a MESMA página. Esgotadas as tentativas, a partição falha
   # e a próxima execução retoma dela: nunca um buraco silencioso.
   retry:
@@ -108,7 +112,18 @@ manifest:
         sizeParam: tamanhoPagina
         size: 50
       recordSelector: []
+      # Compra que saiu do PNCP depois de entrar na lista responde 404 (medido em 11/11/2026, na
+      # compra 238 de 64.082): é "nada aqui", não falha. Sem isto uma compra removida para a
+      # leitura inteira, e a próxima tropeça na mesma.
+      ignoreErrors:
+        - status: 404
       partitionField: _partition
+# Quatro horas por fatia. Uma semana de contratações de uma modalidade chega a 345 páginas, uns
+# 14 minutos a 25 por minuto: com o teto padrão de 15 minutos a partição era cortada no meio,
+# retomava do começo e nunca fechava (10/11/2026). O runner ainda grava uma fatia a cada 15
+# minutos, sempre no fim de uma partição.
+limits:
+  maxDurationMs: 14400000
 streams:
   # Atualização constante, pelo `cursor`: a engine lê a última `dataAtualizacaoGlobal` já
   # publicada, volta 7 dias (folga para atualização atrasada) e lista as janelas até hoje, da mais
@@ -162,8 +177,13 @@ streams:
     primaryKey: [[numeroControlePNCP]]
     partitions:
       query: "SELECT formatDateTime(today() + 60, '%Y%m%d') AS data_final, toString(m) AS modalidade FROM system.one ARRAY JOIN range(1, 14) AS m"
-  # Filho das contratações: as compras atualizadas no último ano, para caber no teto de 120 mil.
+  # Filho das contratações: as compras atualizadas no último ano, para caber no teto de partições.
+  # Os nomes são os da tabela do TRATAMENTO (CLEAR), que abre `orgaoEntidade` em
+  # `orgaoEntidade_cnpj`: a lista lê a tabela publicada, e com o tratamento ligado
+  # (INGEST_CLEAR_STAGE) é ela. Com a Modelagem (CURED) ligada em `contratacoes`, os nomes viram
+  # `orgao_entidade_cnpj`, `ano_compra`, `sequencial_compra` e `data_atualizacao_global`, e esta
+  # consulta tem de mudar junto (11/11/2026).
   - name: itens
     syncMode: full_refresh
     partitions:
-      query: "SELECT DISTINCT JSONExtractString(orgaoEntidade, 'cnpj') AS cnpj, toString(anoCompra) AS ano, toString(sequencialCompra) AS sequencial FROM {{table:contratacoes}} WHERE parseDateTimeBestEffortOrNull(toString(dataAtualizacaoGlobal)) >= today() - 365 AND JSONExtractString(orgaoEntidade, 'cnpj') != ''"
+      query: "SELECT DISTINCT orgaoEntidade_cnpj AS cnpj, toString(anoCompra) AS ano, toString(sequencialCompra) AS sequencial FROM {{table:contratacoes}} WHERE dataAtualizacaoGlobal >= today() - 365 AND orgaoEntidade_cnpj != ''"
