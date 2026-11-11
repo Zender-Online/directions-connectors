@@ -327,6 +327,22 @@
                       "type": "null"
                     }
                   ]
+                },
+                "totalPagesPath": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "totalRecordsPath": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
                 }
               },
               "required": [
@@ -486,6 +502,11 @@
             "respectRetryAfter": {
               "default": true,
               "type": "boolean"
+            },
+            "concurrentRuns": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16
             }
           },
           "additionalProperties": false
@@ -517,8 +538,60 @@
               "type": "integer",
               "exclusiveMinimum": 0,
               "maximum": 100000
+            },
+            "partitionConcurrency": {
+              "default": 1,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16
             }
           },
+          "additionalProperties": false
+        },
+        "retry": {
+          "type": "object",
+          "properties": {
+            "attempts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
+            },
+            "baseDelayMs": {
+              "default": 5000,
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 120000
+            },
+            "maxDelayMs": {
+              "default": 120000,
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 600000
+            },
+            "statuses": {
+              "default": [
+                429,
+                500,
+                502,
+                503,
+                504
+              ],
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 400,
+                "maximum": 599
+              }
+            },
+            "blockedHtml": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "attempts"
+          ],
           "additionalProperties": false
         },
         "streams": {
@@ -653,6 +726,22 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "totalPagesPath": {
+                            "minItems": 1,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "totalRecordsPath": {
+                            "minItems": 1,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
                           }
                         },
                         "required": [
@@ -845,6 +934,10 @@
                 "type": "boolean"
               },
               "missingIsEmpty": {
+                "default": false,
+                "type": "boolean"
+              },
+              "labelsRecord": {
                 "default": false,
                 "type": "boolean"
               },
@@ -1075,11 +1168,79 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 20000
+              },
+              "since": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 5000
+                  },
+                  "fallback": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 5000
+                  }
+                },
+                "required": [
+                  "query",
+                  "fallback"
+                ],
+                "additionalProperties": false
+              },
+              "cursor": {
+                "type": "object",
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+                  },
+                  "window": {
+                    "type": "string",
+                    "enum": [
+                      "day",
+                      "week"
+                    ]
+                  },
+                  "lookbackDays": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 366
+                  },
+                  "firstLoadDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3660
+                  },
+                  "format": {
+                    "type": "string",
+                    "enum": [
+                      "yyyyMMdd",
+                      "yyyy-MM-dd"
+                    ]
+                  },
+                  "from": {
+                    "type": "string",
+                    "pattern": "^[a-z_][a-z0-9_]{0,59}$"
+                  },
+                  "to": {
+                    "type": "string",
+                    "pattern": "^[a-z_][a-z0-9_]{0,59}$"
+                  }
+                },
+                "required": [
+                  "field",
+                  "window",
+                  "lookbackDays",
+                  "firstLoadDays",
+                  "format",
+                  "from",
+                  "to"
+                ],
+                "additionalProperties": false
               }
             },
-            "required": [
-              "query"
-            ],
             "additionalProperties": false
           }
         },
@@ -1089,6 +1250,20 @@
         ],
         "additionalProperties": false
       }
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "maxDurationMs": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 21600000
+        }
+      },
+      "required": [
+        "maxDurationMs"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [

@@ -1,0 +1,189 @@
+# yaml-language-server: $schema=../schema/connector.schema.json
+#
+# Portal Nacional de Contratações Públicas, escrito a partir do OpenAPI público:
+#   consulta:    https://pncp.gov.br/api/consulta/v3/api-docs  (listas por período)
+#   manutenção:  https://pncp.gov.br/api/pncp/v3/api-docs      (itens de uma compra)
+# Conferido em 09/11/2026. Sem autenticação. Comportamentos medidos naquele dia:
+#   - janela sem dado responde 204 sem corpo (o runner lê como página vazia);
+#   - o corpo traz `totalPaginas`, que encerra a leitura sem pedir uma página a mais;
+#   - `/contratacoes/publicacao` recusa `tamanhoPagina` acima de 50 (HTTP 400);
+#     `/contratos` e `/atas` aceitaram 500 no integrador anterior;
+#   - na frente da API há um WAF que às vezes devolve uma página HTML com status 200.
+id: pncp
+title: PNCP — Contratações Públicas
+publisher: Governo Federal (Ministério da Gestão)
+kind: http-declarative
+manifest:
+  version: 1
+  requester:
+    urlTemplate: https://pncp.gov.br/api/consulta/v1/contratacoes/atualizacao
+    params:
+      pagina: '{{page}}'
+      tamanhoPagina: '{{size}}'
+  auth:
+    type: none
+  paginator:
+    type: page
+    param: pagina
+    sizeParam: tamanhoPagina
+    size: 50
+    totalPagesPath: [totalPaginas]
+    totalRecordsPath: [totalRegistros]
+  # Não há cota publicada nem cabeçalho de limite: o PNCP só responde 429. Medido em 10/11/2026,
+  # um pedido por vez: a 40 por minuto o 429 era constante; a 30 e a 20, nenhum em 100 pedidos.
+  # 25 deixa folga, e o runner ainda desacelera sozinho se vier um 429.
+  # O limite é do endereço de onde se chama, não de cada leitura: duas leituras a 25 cada são 50
+  # por minuto saindo do mesmo IP. Por isso no máximo uma leitura do PNCP por vez, somando todos
+  # os runners e organizações; as outras esperam na fila e se alternam a cada fatia.
+  rateLimit:
+    requestsPerMinute: 25
+    concurrentRuns: 1
+  # 5xx, 429 e a página do WAF repetem a MESMA página. Esgotadas as tentativas, a partição falha
+  # e a próxima execução retoma dela: nunca um buraco silencioso.
+  retry:
+    attempts: 5
+    baseDelayMs: 5000
+    maxDelayMs: 120000
+    blockedHtml: true
+  limits:
+    requestTimeoutMs: 90000
+  streams:
+    # Contratações ATUALIZADAS na semana, por modalidade (a API exige a modalidade). O filtro é
+    # pela `dataAtualizacaoGlobal`: uma compra alterada depois de publicada volta a ser lida.
+    - name: contratacoes
+      params:
+        dataInicial: '{{data_inicial}}'
+        dataFinal: '{{data_final}}'
+        codigoModalidadeContratacao: '{{modalidade}}'
+      recordSelector: [data]
+      missingIsEmpty: true
+
+    # Contratos atualizados no dia.
+    - name: contratos
+      request:
+        urlTemplate: https://pncp.gov.br/api/consulta/v1/contratos/atualizacao
+      paginator:
+        type: page
+        param: pagina
+        sizeParam: tamanhoPagina
+        size: 500
+        totalPagesPath: [totalPaginas]
+        totalRecordsPath: [totalRegistros]
+      params:
+        dataInicial: '{{data_inicial}}'
+        dataFinal: '{{data_final}}'
+      recordSelector: [data]
+      missingIsEmpty: true
+
+    # Atas de registro de preço atualizadas na semana.
+    - name: atas
+      request:
+        urlTemplate: https://pncp.gov.br/api/consulta/v1/atas/atualizacao
+      paginator:
+        type: page
+        param: pagina
+        sizeParam: tamanhoPagina
+        size: 500
+        totalPagesPath: [totalPaginas]
+        totalRecordsPath: [totalRegistros]
+      params:
+        dataInicial: '{{data_inicial}}'
+        dataFinal: '{{data_final}}'
+      recordSelector: [data]
+      missingIsEmpty: true
+
+    # Editais com proposta aberta até a data final, por modalidade: o retrato de hoje.
+    - name: editais_abertos
+      request:
+        urlTemplate: https://pncp.gov.br/api/consulta/v1/contratacoes/proposta
+      params:
+        dataFinal: '{{data_final}}'
+        codigoModalidadeContratacao: '{{modalidade}}'
+      recordSelector: [data]
+      missingIsEmpty: true
+
+    # Itens de cada compra. A API devolve a lista solta, sem envelope: termina na página vazia.
+    - name: itens
+      request:
+        urlTemplate: https://pncp.gov.br/api/pncp/v1/orgaos/{{cnpj}}/compras/{{ano}}/{{sequencial}}/itens
+      paginator:
+        type: page
+        param: pagina
+        sizeParam: tamanhoPagina
+        size: 50
+      recordSelector: []
+      # Compra que saiu do PNCP depois de entrar na lista responde 404 (medido em 11/11/2026, na
+      # compra 238 de 64.082): é "nada aqui", não falha. Sem isto uma compra removida para a
+      # leitura inteira, e a próxima tropeça na mesma.
+      ignoreErrors:
+        - status: 404
+      partitionField: _partition
+# Quatro horas por fatia. Uma semana de contratações de uma modalidade chega a 345 páginas, uns
+# 14 minutos a 25 por minuto: com o teto padrão de 15 minutos a partição era cortada no meio,
+# retomava do começo e nunca fechava (10/11/2026). O runner ainda grava uma fatia a cada 15
+# minutos, sempre no fim de uma partição.
+limits:
+  maxDurationMs: 14400000
+streams:
+  # Atualização constante, pelo `cursor`: a engine lê a última `dataAtualizacaoGlobal` já
+  # publicada, volta 7 dias (folga para atualização atrasada) e lista as janelas até hoje, da mais
+  # velha para a mais nova; na primeira carga, os últimos dois anos. Cada janela é um checkpoint, e
+  # se a API cair de vez as janelas completas são publicadas: a próxima execução segue da última
+  # data. A chave mantém só a versão mais recente de cada registro.
+  # Contratos e atas vão por DIA: uma semana de contratos passa de 33 mil registros e não fecha
+  # nos 15 min de uma fatia (medido em 10/11/2026: ~25 s por página de 500). Sem partição
+  # concluída não há checkpoint e a execução falha; um dia (9.667 em 04/11/2025) cabe com folga.
+  # As contratações vão por semana, e cada semana pelas 13 modalidades (a API exige uma).
+  - name: contratacoes
+    syncMode: incremental
+    primaryKey: [[numeroControlePNCP]]
+    partitions:
+      query: "SELECT toString(m) AS modalidade FROM system.one ARRAY JOIN range(1, 14) AS m"
+      cursor:
+        field: dataAtualizacaoGlobal
+        window: week
+        lookbackDays: 7
+        firstLoadDays: 730
+        format: yyyyMMdd
+        from: data_inicial
+        to: data_final
+  - name: contratos
+    syncMode: incremental
+    primaryKey: [[numeroControlePNCP]]
+    partitions:
+      cursor:
+        field: dataAtualizacaoGlobal
+        window: day
+        lookbackDays: 7
+        firstLoadDays: 730
+        format: yyyyMMdd
+        from: data_inicial
+        to: data_final
+  - name: atas
+    syncMode: incremental
+    primaryKey: [[numeroControlePNCPAta]]
+    partitions:
+      cursor:
+        field: dataAtualizacaoGlobal
+        window: day
+        lookbackDays: 7
+        firstLoadDays: 730
+        format: yyyyMMdd
+        from: data_inicial
+        to: data_final
+  # O retrato de hoje: carga completa a cada execução.
+  - name: editais_abertos
+    syncMode: full_refresh
+    primaryKey: [[numeroControlePNCP]]
+    partitions:
+      query: "SELECT formatDateTime(today() + 60, '%Y%m%d') AS data_final, toString(m) AS modalidade FROM system.one ARRAY JOIN range(1, 14) AS m"
+  # Filho das contratações: as compras atualizadas no último ano, para caber no teto de partições.
+  # Os nomes são os da tabela do TRATAMENTO (CLEAR), que abre `orgaoEntidade` em
+  # `orgaoEntidade_cnpj`: a lista lê a tabela publicada, e com o tratamento ligado
+  # (INGEST_CLEAR_STAGE) é ela. Com a Modelagem (CURED) ligada em `contratacoes`, os nomes viram
+  # `orgao_entidade_cnpj`, `ano_compra`, `sequencial_compra` e `data_atualizacao_global`, e esta
+  # consulta tem de mudar junto (11/11/2026).
+  - name: itens
+    syncMode: full_refresh
+    partitions:
+      query: "SELECT DISTINCT orgaoEntidade_cnpj AS cnpj, toString(anoCompra) AS ano, toString(sequencialCompra) AS sequencial FROM {{table:contratacoes}} WHERE dataAtualizacaoGlobal >= today() - 365 AND orgaoEntidade_cnpj != ''"

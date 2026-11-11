@@ -1,0 +1,263 @@
+# yaml-language-server: $schema=../schema/connector.schema.json
+#
+# Compras.gov.br — dados abertos, escrito a partir do OpenAPI público:
+#   https://dadosabertos.compras.gov.br/v3/api-docs  (Swagger: /swagger-ui/index.html)
+# Não é o PNCP: outro sistema, outro endereço e outro envelope. Esta versão traz os módulos
+# 01 (catálogo de material, o CATMAT) e 02 (catálogo de serviço, o CATSER): as tabelas de
+# referência que dizem o que é o código de item que o PNCP cita.
+# Conferido em 10/11/2026. Sem autenticação. Medido naquele dia:
+#   - o envelope é `resultado` com `totalRegistros` e `totalPaginas`;
+#   - `tamanhoPagina` vai de 10 a 500 (5.000 dá HTTP 400), e só alguns endpoints o aceitam;
+#   - os totais de cada endpoint estão no comentário do stream.
+id: compras-gov-br
+title: Compras.gov.br — Catálogos de material e serviço
+publisher: Governo Federal (Ministério da Gestão)
+kind: http-declarative
+manifest:
+  version: 1
+  requester:
+    urlTemplate: https://dadosabertos.compras.gov.br/modulo-material/1_consultarGrupoMaterial
+    params:
+      pagina: '{{page}}'
+  auth:
+    type: none
+  paginator:
+    type: page
+    param: pagina
+    totalPagesPath: [totalPaginas]
+    totalRecordsPath: [totalRegistros]
+  # Sem cota publicada; folga para não pesar num serviço público.
+  # 120 por minuto: as características são 346 mil consultas de menos de meio segundo, e a 60
+  # levariam quatro dias. Uma página funda pesa mais no servidor que centenas delas.
+  # Uma leitura por vez neste endereço, somando runners e organizações. Medido em 11/11/2026:
+  # com quatro pedidos simultâneos o 429 era contínuo e a leitura caía para 15 a 60 itens por
+  # minuto; um pedido por vez, sem outra leitura ao lado, fazia uns 80.
+  rateLimit:
+    requestsPerMinute: 120
+    concurrentRuns: 1
+  # 5xx, 429, página HTML e 400 repetem a mesma página; esgotadas as tentativas, a leitura falha.
+  # O 400 entra porque é transitório aqui: em 10/11/2026 a página 523 dos itens de material
+  # respondeu 400 no meio da leitura e 200 logo depois, com os mesmos parâmetros.
+  retry:
+    attempts: 5
+    baseDelayMs: 5000
+    maxDelayMs: 120000
+    statuses: [400, 429, 500, 502, 503, 504]
+    blockedHtml: true
+  limits:
+    requestTimeoutMs: 90000
+  streams:
+    # Grupos de material (79).
+    - name: material_grupos
+      request:
+        urlTemplate: https://dadosabertos.compras.gov.br/modulo-material/1_consultarGrupoMaterial
+      recordSelector: [resultado]
+      missingIsEmpty: true
+
+    # Classes de material (711).
+    - name: material_classes
+      request:
+        urlTemplate: https://dadosabertos.compras.gov.br/modulo-material/2_consultarClasseMaterial
+      recordSelector: [resultado]
+      missingIsEmpty: true
+
+    # Padrões descritivos de material, o PDM (20.445).
+    - name: material_pdms
+      request:
+        urlTemplate: https://dadosabertos.compras.gov.br/modulo-material/3_consultarPdmMaterial
+      paginator:
+        type: page
+        param: pagina
+        sizeParam: tamanhoPagina
+        size: 500
+        totalPagesPath: [totalPaginas]
+        totalRecordsPath: [totalRegistros]
+      params:
+        tamanhoPagina: '{{size}}'
+      recordSelector: [resultado]
+      missingIsEmpty: true
+
+    # Itens de material, o CATMAT (346.140). É o código que o item de uma compra cita.
+    - name: material_itens
+      request:
+        urlTemplate: https://dadosabertos.compras.gov.br/modulo-material/4_consultarItemMaterial
+      paginator:
+        type: page
+        param: pagina
+        sizeParam: tamanhoPagina
+        size: 500
+        totalPagesPath: [totalPaginas]
+        totalRecordsPath: [totalRegistros]
+      params:
+        tamanhoPagina: '{{size}}'
+      recordSelector: [resultado]
+      missingIsEmpty: true
+
+    # Natureza de despesa por PDM. A fonte publica só 22 linhas, com ou sem filtro (medido em 10/11/2026).
+    - name: material_naturezas_despesa
+      request:
+        urlTemplate: https://dadosabertos.compras.gov.br/modulo-material/5_consultarMaterialNaturezaDespesa
+      paginator:
+        type: page
+        param: pagina
+        sizeParam: tamanhoPagina
+        size: 500
+        totalPagesPath: [totalPaginas]
+        totalRecordsPath: [totalRegistros]
+      params:
+        tamanhoPagina: '{{size}}'
+      recordSelector: [resultado]
+      missingIsEmpty: true
+
+    # Unidades de fornecimento por PDM (38.143). Medido em 10/11/2026: a paginação repetiu 42 linhas
+    # idênticas entre páginas, sinal de ordenação instável na API (e de 42 que podem ter ficado de fora).
+    - name: material_unidades_fornecimento
+      request:
+        urlTemplate: https://dadosabertos.compras.gov.br/modulo-material/6_consultarMaterialUnidadeFornecimento
+      paginator:
+        type: page
+        param: pagina
+        sizeParam: tamanhoPagina
+        size: 500
+        totalPagesPath: [totalPaginas]
+        totalRecordsPath: [totalRegistros]
+      params:
+        tamanhoPagina: '{{size}}'
+      recordSelector: [resultado]
+      missingIsEmpty: true
+
+    # Características de cada item (1,74 milhão). Lidas POR ITEM, uma consulta por código de
+    # `material_itens`: a paginação não chega ao fim. Medido em 10/11/2026, a página 1 leva 20 s,
+    # a 2.000 leva 205 s, e da 2.500 em diante o gateway corta em 240 s com 504; o custo cresce
+    # com a profundidade, não com o tamanho da página. Por item, 0,2 a 0,5 s, e um código sem
+    # característica responde 200 com a lista vazia.
+    - name: material_caracteristicas
+      request:
+        urlTemplate: https://dadosabertos.compras.gov.br/modulo-material/7_consultarMaterialCaracteristicas
+      paginator:
+        type: page
+        param: pagina
+        sizeParam: tamanhoPagina
+        size: 500
+        totalPagesPath: [totalPaginas]
+        totalRecordsPath: [totalRegistros]
+      params:
+        tamanhoPagina: '{{size}}'
+        codigoItem: '{{codigo_item}}'
+      recordSelector: [resultado]
+      missingIsEmpty: true
+
+    # Seções de serviço (6).
+    - name: servico_secoes
+      request:
+        urlTemplate: https://dadosabertos.compras.gov.br/modulo-servico/1_consultarSecaoServico
+      recordSelector: [resultado]
+      missingIsEmpty: true
+
+    # Divisões de serviço (40).
+    - name: servico_divisoes
+      request:
+        urlTemplate: https://dadosabertos.compras.gov.br/modulo-servico/2_consultarDivisaoServico
+      recordSelector: [resultado]
+      missingIsEmpty: true
+
+    # Grupos de serviço (148).
+    - name: servico_grupos
+      request:
+        urlTemplate: https://dadosabertos.compras.gov.br/modulo-servico/3_consultarGrupoServico
+      recordSelector: [resultado]
+      missingIsEmpty: true
+
+    # Classes de serviço (313).
+    - name: servico_classes
+      request:
+        urlTemplate: https://dadosabertos.compras.gov.br/modulo-servico/4_consultarClasseServico
+      recordSelector: [resultado]
+      missingIsEmpty: true
+
+    # Subclasses de serviço (281).
+    - name: servico_subclasses
+      request:
+        urlTemplate: https://dadosabertos.compras.gov.br/modulo-servico/5_consultarSubClasseServico
+      recordSelector: [resultado]
+      missingIsEmpty: true
+
+    # Itens de serviço, o CATSER (3.107).
+    - name: servico_itens
+      request:
+        urlTemplate: https://dadosabertos.compras.gov.br/modulo-servico/6_consultarItemServico
+      paginator:
+        type: page
+        param: pagina
+        sizeParam: tamanhoPagina
+        size: 500
+        totalPagesPath: [totalPaginas]
+        totalRecordsPath: [totalRegistros]
+      params:
+        tamanhoPagina: '{{size}}'
+      recordSelector: [resultado]
+      missingIsEmpty: true
+
+    # Unidades de medida por serviço (3.456).
+    - name: servico_unidades_medida
+      request:
+        urlTemplate: https://dadosabertos.compras.gov.br/modulo-servico/7_consultarUndMedidaServico
+      recordSelector: [resultado]
+      missingIsEmpty: true
+
+    # Natureza de despesa por serviço (148).
+    - name: servico_naturezas_despesa
+      request:
+        urlTemplate: https://dadosabertos.compras.gov.br/modulo-servico/8_consultarNaturezaDespesaServico
+      recordSelector: [resultado]
+      missingIsEmpty: true
+# Duas horas por fatia: os itens de material levam uns 15 minutos. As características passam
+# disso de longe (346 mil consultas, uns dois dias) e seguem em fatias, retomando do último item lido.
+limits:
+  maxDurationMs: 7200000
+# Tabelas de referência: carga completa a cada execução. Só as características são partidas.
+streams:
+  - name: material_grupos
+    syncMode: full_refresh
+    primaryKey: [[codigoGrupo]]
+  - name: material_classes
+    syncMode: full_refresh
+    primaryKey: [[codigoClasse]]
+  - name: material_pdms
+    syncMode: full_refresh
+    primaryKey: [[codigoPdm]]
+  - name: material_itens
+    syncMode: full_refresh
+    primaryKey: [[codigoItem]]
+  - name: material_naturezas_despesa
+    syncMode: full_refresh
+  - name: material_unidades_fornecimento
+    syncMode: full_refresh
+  - name: material_caracteristicas
+    syncMode: full_refresh
+    primaryKey: [[codigoItem], [numeroCaracteristica]]
+    # Depende de `material_itens` publicada: é a lista de códigos.
+    partitions:
+      query: "SELECT toString(codigoItem) AS codigo_item FROM {{table:material_itens}}"
+  - name: servico_secoes
+    syncMode: full_refresh
+    primaryKey: [[codigoSecao]]
+  - name: servico_divisoes
+    syncMode: full_refresh
+    primaryKey: [[codigoDivisao]]
+  - name: servico_grupos
+    syncMode: full_refresh
+    primaryKey: [[codigoGrupo]]
+  - name: servico_classes
+    syncMode: full_refresh
+    primaryKey: [[codigoClasse]]
+  - name: servico_subclasses
+    syncMode: full_refresh
+    primaryKey: [[codigoSubclasse]]
+  - name: servico_itens
+    syncMode: full_refresh
+    primaryKey: [[codigoServico]]
+  - name: servico_unidades_medida
+    syncMode: full_refresh
+  - name: servico_naturezas_despesa
+    syncMode: full_refresh
